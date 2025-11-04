@@ -1,5 +1,6 @@
 # LC data file input, 11/3/25
 # Alicia Melotik
+# amz-check branch (potential edit by Alison 11/4/25)
 
 library(collections)
 library(dplyr)
@@ -10,17 +11,19 @@ library(googlesheets4)
 #include functions from header file?
 #source("my_header.R")
 
+#This code chunk creates a function called "read_into_dataframe" that requires one input argument "full_path" 
+#It reads in the relevant MV file and cleans up the dataframe
 read_into_dataframe <- function(full_path) {
-  raw_data <- read.csv(full_path, header=FALSE)
-  all_data <- raw_data
-  
+  raw_data <- read.csv(full_path, header=FALSE, na.strings = c("","NA"))  # I think this will convert the empty rows to NA, which we can filter out
+  all_data <- raw_data %>% filter(!if_all(everything(), is.na)) #Should remove NAs we created in last line
+  str(all_data) #Yup! only 30 obs now instead of 1000
   #create column names for data frame
   for (i in 3:7) {
-    colnames(all_data)[i] = raw_data[2, i]
+    colnames(all_data)[i] = raw_data[2, i] #this takes text in row 2 and uses it as column headers for columns 3:7
   }
-  for (i in 8:length(raw_data)) {
+  for (i in 8:length(raw_data)) {       #This loops over columns 8-end to reformat analytes that start with a number -
     if (grepl("^[0-9]", raw_data[1, i])) {
-      #if name starts with a number, add an underscore in front
+      #if name starts with a number, add an underscore in front  
       raw_data[1, i] <- paste0(".", raw_data[1, i])
     }
     col_name <- raw_data[1, i]
@@ -35,15 +38,15 @@ read_into_dataframe <- function(full_path) {
   ####### DOES NOT LIKE THE REPEATED COL NAMES #########
   ### fixed that but istd col names still have x13 before names? ###
   
-  #remove first 2 rows of data frame (just set as column names)
+  #remove first 2 rows of data frame (just set as column names) #Good! Just adding that the first 2 rows previously showed the column names, so now they are not necessary
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -2)))
   
-  #remove first 2 columns of data frame
+  #remove first 2 columns of data frame #Good. The first two column are "sample" which is blank for all rows and "NA" which is NA for all samples. 3rd column is "Name" which is our ID
   all_data$V1 <- NULL
   all_data$V2 <- NULL
   
   #make the row names the trial names
-  row.names(all_data) <- all_data$Name
+  row.names(all_data) <- all_data$Name  #Don't know I get what this is doing. Hopefully I didn't delete something
   
   #force blank levels to 0
   for (row in 1:length(all_data[, "Level"])){
@@ -56,22 +59,33 @@ read_into_dataframe <- function(full_path) {
   return (all_data)
 }
 
+#The next code chunk makes a function "read_data" that takes one input arguement (full_path)
+##
 read_data <- function(full_path) {
   raw_data <- read.csv(full_path, header=FALSE)
-  trial_names <- tail(raw_data[, 3], -2)
+  trial_names <- tail(all_data[, 3], -2) #hopefully calling this is OK. otherwise you'll have to keep removing the NAs like I show below
+  
+  #I got a lot of NA values in the "trial_names" if that is for you, too try:
+  trial_names <- na.omit(trial_names)
   
   #extract target concentrations for method val
-  target_conc <- tail(raw_data[, 6], -2) %>% as.numeric()
+  target_conc <- tail(all_data[, 6], -2) %>% as.numeric()
+  
+  #same deal to remove NAs (there may be more elegant ways than this, too)
+  target_conc <- na.omit(target_conc)
   
   #store ISTD peak areas in list for quick lookup later
   ISTD_areas <- list()
-  for (col_index in seq(9, length(raw_data), by = 2) ) {
+  for (col_index in seq(9, length(all_data), by = 2) ) {  ##I thought if I only looped it through the all_data (30 entries) instead of raw_data (1000) it would work, but still creating a bunch of NAs
     name <- raw_data[[col_index]][[1]]
     ##check if ISTD has already been added to list: if not, add it and its area values
     if (grepl("ISTD", name) && !(substr(name, 1, nchar(name) - 2) %in% names(ISTD_areas))) {
         ISTD_areas[[name]] <- raw_data[-(1:2), col_index] %>% as.numeric()
     }
   }
+  
+  #same deal with NAs
+  ISTD_areas <- na.omit(ISTD_areas)
   
   #extract area values for each analyte
   native_areas <- list()
@@ -210,7 +224,7 @@ main <- function() {
   ### update how to get filepath, it's hardcoded in for now ###
   ### using goodle drive library (already imported) ###
   
-  full_path <- paste0("C:/Users/77ali/OneDrive/Desktop/SWEL R/", filename)
+  full_path <- file.path(getwd(), filename) #AZ updated this so it reads from github. Hopefully that's okay for the development stage!
   
   #check if file path is valid
   if (!(file.exists(full_path))) {
@@ -238,5 +252,6 @@ main <- function() {
   
 }
 
-main()
+main() #Prompts user to enter a File Name.
+        # User should enter the method val file they want to input and work with
 
