@@ -38,3 +38,12 @@ read_into_dataframe <- function(raw_data) {
   
   return (all_data)
 }
+
+#variables shared across most functions, make available for global use
+get_shared_vars <- function(all_data) {
+  # indices 6 to length of col names / 2 = number of analytes
+  all_col_names <<- colnames(all_data)
+  analyte_cols <<- all_col_names[seq(5, length(all_col_names) - 1, 2)]
+  istd_cols <<- all_col_names[seq(6, length(all_col_names), 2)]
+  num_analytes <<- length(analyte_cols)
+}
