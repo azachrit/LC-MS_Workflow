@@ -6,31 +6,23 @@ source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/mai
 library(openxlsx)
 
 calc_slopes <- function(all_data) {
-  all_col_names <- colnames(all_data) # indices 6 to length of col names / 2 = number of analytes
-  slopes <- list()
-  row_num <- 0
+  #blanks removed data
+  caldata <- all_data %>% filter(Level > 0)
   
   #get the unique levels and set as the row names
   unique_levels <- sort(unique(caldata$Level))
   num_levels <- length(unique_levels)
-  num_analytes <- floor((length(all_col_names) - 5) / 2)
+  row_num <- 1
 
-  native_avg_table <- matrix(nrow = num_levels, ncol = num_analytes, dimnames = list(unique_levels, rep("", num_analytes)))
-  rownames(native_avg_table) <- unique_levels
-  ISTD_avg_table <- native_avg_table
-  N2Iratio_table <- native_avg_table
-  
-  #blanks removed data
-  caldata <- all_data %>% filter(Level > 0)
+  native_avg_table <- matrix(nrow = num_levels, ncol = num_analytes, dimnames = list(unique_levels, analyte_cols))
+  ISTD_avg_table <- matrix(nrow = num_levels, ncol = num_analytes, dimnames = list(unique_levels, istd_cols))
+  N2Iratio_table <- matrix(nrow = num_levels, ncol = num_analytes, dimnames = list(unique_levels, analyte_cols))
+  slopes <- matrix(nrow = 2, ncol = num_analytes, dimnames = list(c("Slope", "R2"), analyte_cols))
   
   #loop through each analyte to calculate each slope
-  for (i in seq(5, length(all_col_names) - 1, 2)) {
-    analyte <- all_col_names[i]
-    ISTD <- all_col_names[i+1]
+  for (analyte in analyte_cols) {
+    ISTD <- istd_cols[[row_num]]
     row_num <- row_num + 1
-    print(i)
-    print(analyte)
-    print(ISTD)
     
     #find N2IRatio across each sample and create vector to store values for lm use
     #N2Iratio <- caldata[[analyte]] / caldata[[ISTD]]
@@ -43,13 +35,10 @@ calc_slopes <- function(all_data) {
         .groups = "drop"
       )
     
-    #put relevant info into matrices and update column name to current analyte/ISTD
-    native_avg_table[, row_num] <- df_summary$native_avg
-    ISTD_avg_table[, row_num] <- df_summary$ISTD_avg
-    N2Iratio_table[, row_num] <- df_summary$RR
-    colnames(native_avg_table)[row_num] <- analyte
-    colnames(ISTD_avg_table)[row_num] <- ISTD
-    colnames(N2Iratio_table)[row_num] <- analyte
+    #store relevant info into matrices and update column name to current analyte/ISTD
+    native_avg_table[, analyte] <- df_summary$native_avg
+    ISTD_avg_table[, ISTD] <- df_summary$ISTD_avg
+    N2Iratio_table[, analyte] <- df_summary$RR
     
     #linear model regression from Alison's draft r script
     cal_reg <- lm(RR ~ 0 + Level, data = df_summary) ## added "0 +" forces line through origin 
@@ -57,81 +46,104 @@ calc_slopes <- function(all_data) {
     r2 <- summary(cal_reg)$r.squared
     
     # Save slope and r^2 results in list
-    slopes[[analyte]] <- list(
-      slope = slope,
-      r2 = r2
-    )
+    slopes[, analyte] <- c(slope, r2)
   }
-  slopes_df <- bind_rows(slopes, .id = "Analyte") %>% 
-    pivot_longer(cols = c(slope, r2), names_to = "metric", values_to = "value") %>%
-    pivot_wider(names_from = Analyte, values_from = value)
-  slopes_sorted <- slopes[order(names(slopes))]
   
-  return (c(slopes_df, native_avg_table, ISTD_avg_table, N2Iratio_table))
+  return (list(slopes, native_avg_table, ISTD_avg_table, N2Iratio_table, num_levels))
 }
 
 ##variation calculations same for other workflow script (avg, std dev, RSD) 
 #(use header file again)
-variation_calcs <- function(slopes) {
+variation_calcs <- function(all_data) {
   #avg already calculated above in slope func, move to somewhere where it can be accessed here?
   replicate_data <- all_data %>% filter(Level == 1)
+  num_samples <- length(replicate_data[, 1])
   
-  # Identify analyte / ISTD pairs
-  analyte_cols <- all_col_names[seq(6, length(all_col_names) - 1, 2)]
-  istd_cols <- all_col_names[seq(7, length(all_col_names), 2)]
-  
-  variation_table <- tibble(
-    Analyte = analyte_cols,
-    ISTD    = istd_cols
+  native_var_table <- tibble(
+    Analyte = analyte_cols
   ) %>%
     rowwise() %>%
     mutate(
-      n_avg  = mean(replicate_data[[Analyte]], na.rm = TRUE), #(na.rm means remove NA values if any present)
-      n_sd   = sd(replicate_data[[Analyte]],   na.rm = TRUE),
-      n_rsd  = (n_sd / n_avg) * 100,
-      i_avg  = mean(replicate_data[[ISTD]],    na.rm = TRUE),
-      i_sd   = sd(replicate_data[[ISTD]],      na.rm = TRUE),
-      i_rsd  = (i_sd / i_avg) * 100
+      Average = mean(replicate_data[[Analyte]], na.rm = TRUE), #(na.rm means remove NA values if any present)
+      Std_Dev = sd(replicate_data[[Analyte]], na.rm = TRUE),
+      RSD = (Std_Dev / Average) * 100
     ) %>%
     ungroup()
+  
+  #repeat with ISTDs
+  ISTD_var_table <- tibble(
+    Analyte = analyte_cols,
+    ISTD = istd_cols
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Average = mean(replicate_data[[ISTD]], na.rm = TRUE),
+      Std_Dev = sd(replicate_data[[ISTD]], na.rm = TRUE),
+      RSD = (Std_Dev / Average) * 100
+    ) %>%
+    ungroup() %>%
+    select(-ISTD)
+  
+  #format tables to have analytes lengthwise
+  native_var_df <- native_var_table %>% 
+    pivot_longer(cols = c(Average, Std_Dev, RSD), names_to = "1 ng/ml Native", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
+
+  ISTD_var_df <- ISTD_var_table %>% 
+    pivot_longer(cols = c(Average, Std_Dev, RSD), names_to = "1 ng/ml ISTD", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
+  
+  return (list(native_var_df, ISTD_var_df))
 } 
 
-conc_calcs <- function(slopes) {
+conc_calcs <- function(all_data, slopes) {
   #measured conc = RR/slope
   #### currently doing it exactly like 7/22 and 8/22 examples: 
   ####       not using avgs and only using blanks and 50 ng/l samples ####
   replicate_data <- all_data %>% filter(Level == 0 | Level == 0.05)
-  
-  # Identify analyte / ISTD pairs
-  analyte_cols <- all_col_names[seq(6, length(all_col_names) - 1, 2)]
-  istd_cols <- all_col_names[seq(7, length(all_col_names), 2)]
 
   #for each replicate sample, calculate RR and use prior calculated slope to get conc
-  rows = rownames(replicate_data)
-  row_num = 1
-  conc_table <- matrix(nrow = length(rows), ncol = num_analytes, dimnames = list(rows, analyte_cols))
+  conc_df <- matrix(nrow = nrow(replicate_data), ncol = num_analytes + 1, 
+                       dimnames = list(rownames(replicate_data), c("Level", analyte_cols)))
   
-  for (idx in seq_along(analyte_cols)) {
-    analyte <- analyte_cols[idx]
-    istd    <- istd_cols[idx]
-    for (j in seq_len(nrow(replicate_data))) {
-      conc_table[j, idx] <- (replicate_data[[analyte]][j]/replicate_data[[ISTD]][j]) / slopes[[analyte]]$slope
-    }
+  for (name in rownames(conc_df)) {
+    conc_df[[name, "Level"]] <- all_data[[name, "Level"]]
   }
   
+  for (idx in seq_len(num_analytes)) {
+    analyte <- analyte_cols[idx]
+    istd    <- istd_cols[idx]
+    RR      <- replicate_data[[analyte]] / replicate_data[[istd]]
+    slope   <- slopes[[1, analyte]]
+    conc_df[, analyte] <- RR / slope
+  }
+  
+  return (conc_df)
 }
 
-linearity <- function(slopes, r2) {
-  #do we need this?
-}
-
-accuracy <- function() {
+accuracy <- function(slopes, native_avg, ISTD_avg) {
   #measured conc and percent differences
+  accuracy_table <- tibble(
+    Analyte = analyte_cols
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Relative_Response = (native_avg[[1, Analyte]] / ISTD_avg[[1, Analyte]]),
+      Measured_Conc = (Relative_Response / slopes[[1, Analyte]]),
+      Percent_Difference = (Measured_Conc - 1) / ((Measured_Conc + 1)/2) * 100
+    ) %>%
+    ungroup()
+  
+  accuracy_df <- accuracy_table %>% 
+    pivot_longer(cols = c(Relative_Response, Measured_Conc, Percent_Difference), names_to = "Accuracy", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
+  
+  return (accuracy_df)
 }
 
-LOB <- function(blanks) {
+LOB <- function(conc_df) {
   #LoB = avg conc. + (1.645 * std dev of blank replicates)
-  replicate_data <- all_data %>% filter(Level == 0)
+  replicate_data <- conc_df %>% filter(Level == 0)
   LOB_table <- tibble(
     Analyte = analyte_cols
   ) %>%
@@ -145,31 +157,30 @@ LOB <- function(blanks) {
   #transpose so analytes as column names
   LOB_df <- LOB_table %>% pivot_longer(cols = c(avg, sd, LOB), names_to = "metric", values_to = "value") %>%
     pivot_wider(names_from = Analyte, values_from = value)
-  
+
+  return (LOB_df)
 }
 
-LOD <- function(LOBs) {
+LOD_LOQ <- function(conc_df, LOB_df) {
   #LoD = LoB + (1.645 * std dev of 50 ng/L replicates)
-  replicate_data <- all_data %>% filter(Level == 0.05)
+  replicate_data <- conc_df %>% filter(Level == 0.05)
   LOD_table <- tibble(
     Analyte = analyte_cols
   ) %>%
     rowwise() %>%
     mutate(
-      LOB  = LOB_df[[Analyte]][3],
+      LOB  = LOB_df[[3, Analyte]],
       sd   = sd(replicate_data[[Analyte]],   na.rm = TRUE),
-      LOD = LOB + (1.645 * sd)
+      LOD = LOB + (1.645 * sd),
+      LOQ = pmax(LOD * 3, 0.025)
     ) %>%
     ungroup()
   #transpose so analytes as column names
   LOD_df <- LOD_table %>% 
-    pivot_longer(cols = c(LOB, sd, LOD), names_to = "metric", values_to = "value") %>%
+    pivot_longer(cols = c(LOB, sd, LOD, LOQ), names_to = "metric", values_to = "value") %>%
     pivot_wider(names_from = Analyte, values_from = value)
-}
 
-LOQ <- function(LODs) {
-  #LoQ = LoD * 3 (or 0.025 if calculation is below that)
-  
+  return (LOD_df)
 }
 
 upload_mv <- function() {
@@ -189,36 +200,72 @@ upload_mv <- function() {
   raw_data <- read_excel(temp_file, sheet = 1) #raw data currently in sheet 1
   unlink(temp_file)
   
-  #perform relevant operations on data
+  #perform relevant operations on data using functions
   all_data <- read_into_dataframe(raw_data)
+  get_shared_vars(all_data)
+  
   result <- calc_slopes(all_data)
-  slopes_df <- result[1]
-  native_avg_table <- result[2]
-  ISTD_avg_table <- result[3]
-  N2Iratio_table <- result[4]
+  slopes_df <- result[[1]]
+  native_avg_table <- result[[2]]
+  ISTD_avg_table <- result[[3]]
+  N2Iratio_table <- result[[4]]
+  num_levels <- result[[5]]
+
+  result <- variation_calcs(all_data)
+  native_var_df <- result[[1]]
+  ISTD_var_df <- result[[2]]
   
-  #using google drive library (already imported), find raw data file
-  file_path <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type="folder")
-  file_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "-Method_val.xlsx")
-  temp_file <- tempfile(fileext = ".xlsx")
+  accuracy_df <- accuracy(slopes_df, native_var_df, ISTD_var_df)
   
-  #add relevant data to temp file
-  #writexl::write_xlsx(list(Sheet1 = raw_data, Sheet2 = all_data, Sheet3 = slopes_df), path = temp_file)
+  conc_df <- as.data.frame(conc_calcs(all_data, slopes_df))
+  
+  LOB_df <- LOB(conc_df)
+  LOD_LOQ_df <- LOD_LOQ(conc_df, LOB_df)
+  
+  #add relevant data to temp file through openxlsx workbook
+  hs1 <- createStyle(halign = "justify", textDecoration = "Bold", border = "TopBottomLeftRight", fontColour = "black")
+
   wb <- createWorkbook()
   addWorksheet(wb, "Raw Data")
-  writeData(wb, "Raw Data", raw_data, colNames = FALSE)
+  writeData(wb, "Raw Data", raw_data)
   addWorksheet(wb, "Condensed Data")
-  writeDataTable(wb, "Condensed Data", all_data, rowNames = TRUE,  tableStyle = "TableStyleLight9")
+  writeDataTable(wb, "Condensed Data", all_data, rowNames = TRUE)
+
   addWorksheet(wb, "Peak Areas")
-  hs1 <- createStyle(halign = "justify", textDecoration = "Bold", border = "TopBottomLeftRight", fontColour = "black")
-  writeData(wb, "Peak Areas", analyte_avg_table, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Peak Areas", native_avg_table, rowNames = TRUE, headerStyle = hs1)
   writeData(wb, "Peak Areas", ISTD_avg_table, rowNames = TRUE, startCol = num_analytes + 3, headerStyle = hs1)
-  writeData(wb, "Peak Areas", N2Iratio_table, rowNames = TRUE, startRow = length(levels) + 3, headerStyle = hs1)
+  writeData(wb, "Peak Areas", N2Iratio_table, rowNames = TRUE, startRow = num_levels + 3, headerStyle = hs1)
+  #add table names for clarity
+  writeData(wb, "Peak Areas", "Avg Native Peak Areas", startCol = 1, startRow = 1)
+  writeData(wb, "Peak Areas", "Avg ISTD Peak Areas", startCol = num_analytes + 3, startRow = 1)
+  writeData(wb, "Peak Areas", "Relative Reponse", startCol = 1, startRow = num_levels + 3)
+  
+  addWorksheet(wb, "Variations")
+  writeData(wb, "Variations", native_var_df, headerStyle = hs1)
+  writeData(wb, "Variations", ISTD_var_df, startRow = length(rownames(native_var_df)) + 4, headerStyle = hs1)
+  writeData(wb, "Variations", accuracy_df, startRow = length(rownames(native_var_df)) + length(rownames(ISTD_var_df)) + 7, headerStyle = hs1)
+  
+  addWorksheet(wb, "Conc Calcs")
+  writeData(wb, "Conc Calcs", conc_df, rowNames = TRUE, headerStyle = hs1)
+  
+  addWorksheet(wb, "LOB LOD")
+  writeData(wb, "LOB LOD", LOB_df, headerStyle = hs1)
+  writeData(wb, "LOB LOD", LOD_LOQ_df, startRow = length(rownames(LOB_df)) + 4, headerStyle = hs1)
+  
+  addWorksheet(wb, "Slope and R")
+  writeData(wb, "Slope and R", slopes_df, rowNames = TRUE, headerStyle = hs1)
+  
   #adjust column widths so they're readable
   for (sheet_name in names(wb)) {
     num_cols <- ncol(readWorkbook(wb, sheet = sheet_name, colNames = FALSE, rows = 1)) + 1
     setColWidths(wb, sheet=sheet_name, cols = 1:num_cols, widths="auto")
   }
+
+  #using google drive library (already imported), create temp file to store data in
+  file_path <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type="folder")
+  file_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "-Method_Val.xlsx")
+  temp_file <- tempfile(fileext = ".xlsx")
+  
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
   drive_upload(temp_file, file_path, name=file_name)
