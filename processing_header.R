@@ -2,11 +2,9 @@
 # Alicia Melotik
 
 library(collections)
-library(dplyr)
 library(readxl)
 library(openxlsx)
 library(googledrive) #https://googledrive.tidyverse.org/
-library(googlesheets4)
 library(tidyverse)
 
 read_into_dataframe <- function(raw_data) {
@@ -23,7 +21,7 @@ read_into_dataframe <- function(raw_data) {
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
   #make the row names the trial names
-  row.names(all_data) <- all_data$Name
+  rownames(all_data) <- all_data$Name
   all_data[, 1:3] <- NULL
   
   #force blank levels to 0, and make all levels numeric instead of char
@@ -35,6 +33,7 @@ read_into_dataframe <- function(raw_data) {
   }
   
   all_data <- as.data.frame(all_data)
+  all_data[[1, 1]] <- "Sample"
   
   return (all_data)
 }
