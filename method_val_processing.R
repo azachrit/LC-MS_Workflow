@@ -1,9 +1,16 @@
 # Method Val Draft R Script, 11/3/25
 # Alicia Melotik
 
+# NOTE ON LINEARITY:
+###   always forcing intercept through origin
+###   always linear curve with no weight
+###   range usually (always?) 0.05-100 ng/mL or 50-100,000 ng/L
+
+####### percent differences in accuracy tab are off by a little bit???
+
+
 #include functions and libraries from header file
 source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
-library(openxlsx)
 
 calc_slopes <- function(all_data) {
   #blanks removed data
@@ -12,7 +19,6 @@ calc_slopes <- function(all_data) {
   #get the unique levels and set as the row names
   unique_levels <- sort(unique(caldata$Level))
   num_levels <- length(unique_levels)
-  row_num <- 1
 
   native_avg_table <- matrix(nrow = num_levels, ncol = num_analytes, dimnames = list(unique_levels, analyte_cols))
   ISTD_avg_table <- matrix(nrow = num_levels, ncol = num_analytes, dimnames = list(unique_levels, istd_cols))
@@ -21,8 +27,7 @@ calc_slopes <- function(all_data) {
   
   #loop through each analyte to calculate each slope
   for (analyte in analyte_cols) {
-    ISTD <- istd_cols[[row_num]]
-    row_num <- row_num + 1
+    ISTD <- istd_cols[[analyte]]
     
     #find N2IRatio across each sample and create vector to store values for lm use
     #N2Iratio <- caldata[[analyte]] / caldata[[ISTD]]
@@ -77,8 +82,8 @@ variation_calcs <- function(all_data) {
   ) %>%
     rowwise() %>%
     mutate(
-      Average = mean(replicate_data[[ISTD]], na.rm = TRUE),
-      Std_Dev = sd(replicate_data[[ISTD]], na.rm = TRUE),
+      Average = mean(replicate_data[[istd_cols[[Analyte]]]], na.rm = TRUE),
+      Std_Dev = sd(replicate_data[[istd_cols[[Analyte]]]], na.rm = TRUE),
       RSD = (Std_Dev / Average) * 100
     ) %>%
     ungroup() %>%
@@ -112,7 +117,7 @@ conc_calcs <- function(all_data, slopes) {
   
   for (idx in seq_len(num_analytes)) {
     analyte <- analyte_cols[idx]
-    istd    <- istd_cols[idx]
+    istd    <- istd_cols[analyte]
     RR      <- replicate_data[[analyte]] / replicate_data[[istd]]
     slope   <- slopes[[1, analyte]]
     conc_df[, analyte] <- RR / slope
@@ -187,18 +192,23 @@ upload_mv <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
-  #get most recent method val data
-  ######## DIFF WAY TO INPUT RAW DATA? CURRENTLY PULLING FROM PROCESSED FILES ########
-  file_path <- drive_find(pattern = "Processed Method Val Files", shared_drive = "SWEL Lab", type="folder")
-  cur_files <- drive_ls(file_path, orderBy = "createdTime desc")
-  file_name <- unlist(cur_files[1, "name"])
-  file_id <- unlist(cur_files[1, "id"])
+  #get most recent method val raw data
+  file_path <- drive_find(pattern = "Method Validations", shared_drive = "SWEL Lab", type="folder")
+  files <- drive_ls(file_path, orderBy = "createdTime desc")
+
+  #check if there are any files in the folder
+  if (nrow(files) == 0) {
+    print("ERROR: Please enter your raw data into a new Excel File in the 'Method Validations' folder")
+    return()
+  } 
+  #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN METHOD VAL FOLDER
+  cur_file <- files[1, ]
+  file_id <- unlist(cur_file[["id"]])
   
   #read data from csv at full_path
   temp_file <- tempfile(fileext = ".xlsx")
   drive_download(as_id(file_id), path = temp_file, overwrite = TRUE)
-  raw_data <- read_excel(temp_file, sheet = 1) #raw data currently in sheet 1
-  unlink(temp_file)
+  raw_data <- readWorkbook(temp_file, sheet = 1) #raw data currently in sheet 1
   
   #perform relevant operations on data using functions
   all_data <- read_into_dataframe(raw_data)
@@ -225,11 +235,9 @@ upload_mv <- function() {
   #add relevant data to temp file through openxlsx workbook
   hs1 <- createStyle(halign = "justify", textDecoration = "Bold", border = "TopBottomLeftRight", fontColour = "black")
 
-  wb <- createWorkbook()
-  addWorksheet(wb, "Raw Data")
-  writeData(wb, "Raw Data", raw_data)
+  wb <- loadWorkbook(temp_file, na.convert = FALSE)
   addWorksheet(wb, "Condensed Data")
-  writeDataTable(wb, "Condensed Data", all_data, rowNames = TRUE)
+  writeData(wb, "Condensed Data", all_data, rowNames = TRUE, headerStyle = hs1)
 
   addWorksheet(wb, "Peak Areas")
   writeData(wb, "Peak Areas", native_avg_table, rowNames = TRUE, headerStyle = hs1)
@@ -255,20 +263,23 @@ upload_mv <- function() {
   addWorksheet(wb, "Slope and R")
   writeData(wb, "Slope and R", slopes_df, rowNames = TRUE, headerStyle = hs1)
   
-  #adjust column widths so they're readable
+  #adjust all column widths so they're readable
   for (sheet_name in names(wb)) {
     num_cols <- ncol(readWorkbook(wb, sheet = sheet_name, colNames = FALSE, rows = 1)) + 1
+    #don't adjust spacing for first sheet with raw input, doesn't work well
+    if ((sheet_name == "RAW") | (sheet_name == "Sheet1")) {
+      next
+    }
     setColWidths(wb, sheet=sheet_name, cols = 1:num_cols, widths="auto")
   }
 
-  #using google drive library (already imported), create temp file to store data in
-  file_path <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type="folder")
-  file_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "-Method_Val.xlsx")
-  temp_file <- tempfile(fileext = ".xlsx")
+  #using google drive library (already imported), update file that raw data was pulled from
+  new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "-Method_Val.xlsx")
   
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
-  drive_upload(temp_file, file_path, name=file_name)
+  drive_update(file = cur_file, media = temp_file, name = new_name)
+
   #delete temp file now that it has been uploaded
   unlink(temp_file)
 }

@@ -2,38 +2,42 @@
 # Alicia Melotik
 
 library(collections)
-library(readxl)
 library(openxlsx)
 library(googledrive) #https://googledrive.tidyverse.org/
 library(tidyverse)
 
 read_into_dataframe <- function(raw_data) {
+  ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
   all_data <- raw_data
   
   #create column names for data frame
   for (i in 3:7) {
     colnames(all_data)[i] = raw_data[1, i]
   }
-  
-  ### converting the acq date.time to non date format for some reason? ###
-  
+
   #remove first row of data frame (were just set as column names)
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
-  #make the row names the trial names
+  #make the row names the trial names and remove data irrelevant to calculations
   rownames(all_data) <- all_data$Name
-  all_data[, 1:3] <- NULL
+  all_data[, 1:5] <- NULL
+  all_data[, 2] <- NULL
   
   #force blank levels to 0, and make all levels numeric instead of char
-  all_data <- all_data %>% mutate(Level = if_else(is.na(Level), 0, as.numeric(Level)))
+  all_data <- all_data %>% mutate(Level = if_else(is.na(Level), 0, if_else(Level == "", 0, as.numeric(Level)) ))
   
-  for (i in 5:length(colnames(all_data))) {
+  for (i in 2:length(colnames(all_data))) {
     #make all areas numeric too, not sure why they aren't automatically numbers
     all_data[i] <- lapply(all_data[i], as.numeric)
+
+    #also, change the automatic X in front of analyte names to A so they are sorted correctly
+    if (startsWith(colnames(all_data)[i], "X")) {
+      name <- colnames(all_data)[i]
+      colnames(all_data)[i] <- paste0("a", substr(name, 2, nchar(name)))
+    }
   }
   
   all_data <- as.data.frame(all_data)
-  all_data[[1, 1]] <- "Sample"
   
   return (all_data)
 }
@@ -42,7 +46,17 @@ read_into_dataframe <- function(raw_data) {
 get_shared_vars <- function(all_data) {
   # indices 6 to length of col names / 2 = number of analytes
   all_col_names <<- colnames(all_data)
-  analyte_cols <<- all_col_names[seq(5, length(all_col_names) - 1, 2)]
-  istd_cols <<- all_col_names[seq(6, length(all_col_names), 2)]
+  
+  #order analytes and corresponding istds alphabetically analyte_cols[order(names[analyte_cols])]
+  #start at 2 in sequence to skip Level column
+  analyte_cols <<- all_col_names[seq(2, length(all_col_names) - 1, 2)]
+  istd_cols <<- all_col_names[seq(3, length(all_col_names), 2)]
+
+  #mapping of which analytes correspond to which istds
+  names(istd_cols) <<- analyte_cols
+  
+  #sort analytes alphabetically
+  analyte_cols <<- sort(analyte_cols)
+  
   num_analytes <<- length(analyte_cols)
 }
