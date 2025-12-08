@@ -1,7 +1,6 @@
 #header file for shared functions, 11/12/2025
 # Alicia Melotik
 
-library(collections)
 library(openxlsx)
 library(googledrive) #https://googledrive.tidyverse.org/
 library(tidyverse)
