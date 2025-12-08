@@ -1,6 +1,6 @@
 # LC-MS
 R scripts to automate the "pipeline" LC-MS data processing
-Excel sheets to upload the data are located in the [SWEL Google Drive](https://drive.google.com/drive/u/0/folders/1Wo-_9w0MelpFjG8tsKr8pQDiBCjwmqy3).
+- Excel sheets to upload the data are located in the [SWEL Google Drive](https://drive.google.com/drive/u/0/folders/1Wo-_9w0MelpFjG8tsKr8pQDiBCjwmqy3).
 
 ## Method Val Processing
   ### Running the R script locally
