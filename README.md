@@ -12,7 +12,7 @@ R scripts to automate the "pipeline" LC-MS data processing
   6. The Excel sheet will be updated (& renamed) with the processed data within the same folder it was uploaded to earlier.
   
   ### Dependencies
-    * install.packages(openxlsx)
-    * install.packages(googledrive)
-    * install.packages(tidyverse)
+    install.packages(openxlsx)
+    install.packages(googledrive)
+    install.packages(tidyverse)
   
