@@ -1,53 +1,77 @@
-# LC data file input, 11/3/25
+# LC-MS data file input, 11/3/25
 # Alicia Melotik
 
 #include functions and libraries from header file
-### UPDATE THIS LINE, COULD MAKE IT SOURCE HEADER FROM GITHUB ONCE REPO IS PUBLIC ###
-#source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
-source("C:\\Users\\77ali\\OneDrive\\Desktop\\SWEL R\\processing_header.R")
+source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
 
 
-QAQC <- function(all_data) {
+QAQC <- function(all_data, expected_native, expected_ISTD, slopes_df) {
   #find row indices of 1 NGML samples
-  ngml_samples <- which(grepl("1 *NGML", all_data[, "Name"], ignore.case = TRUE))
+  cal_data <- which(grepl("1 *NGML", all_data[, "Name"], ignore.case = TRUE))
   
-  ## THIS COULD DEFINITELY BE DONE BETTER!
-  calcs <- function(areas, expected) {
-    #calculate avg, stddev peak areas for each compound
-    avg_ngml <- vector()
-    stddev_ngml <- vector()
-    percent_exp <- vector()
-    ngml_count <- length(ngml_samples)
+  native_df <- tibble(
+    Analyte = analyte_cols
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Average = mean(cal_data[[Analyte]], na.rm = TRUE), #(na.rm means remove NA values if any present)
+      Std_Dev = sd(cal_data[[Analyte]], na.rm = TRUE),
+      RSD = (Std_Dev / Average) * 100,
+      Percent_of_Expected = (Average / expected_native[Analyte]) * 100
+    ) %>%
+    ungroup()
   
-    for (analyte in names(areas)) {
-      ngml_vector <- vector()
-      for (index in 1:ngml_count) {
-        ngml_vector <- c(ngml_vector, areas[[analyte]][[index]])
-      }
-      avg_ngml[[analyte]] <- sum(ngml_vector) / ngml_count
-      stddev_ngml[[analyte]] <- sd(ngml_vector)
-      if (analyte %in% names(expected)){
-        percent_exp[[analyte]] <- avg_ngml[[analyte]] / expected[[analyte]] * 100
-      }
-    }
-    return (list(avg_ngml, stddev_ngml, percent_exp))
-  }
+  #repeat with ISTDs
+  ISTD_df <- tibble(
+    Analyte = analyte_cols
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Average = mean(cal_data[[istd_cols[[Analyte]]]], na.rm = TRUE),
+      Std_Dev = sd(cal_data[[istd_cols[[Analyte]]]], na.rm = TRUE),
+      RSD = (Std_Dev / Average) * 100,
+      Percent_of_Expected = (Average / expected_native[[istd_cols[[Analyte]]]]) * 100
+    ) %>%
+    ungroup() %>%
+    select(-ISTD)
   
-  result <- calcs(native_areas, expected_native)
-  #can replace this w saving necessary values, writing to sheet
-  avg_native <- result[[1]]
-  stddev_native <- result[[2]]
-  percent_exp_native <- result[[3]]
+  #format tables to have analytes lengthwise
+  native_df <- native_df %>% 
+    pivot_longer(cols = c(Average, Std_Dev, RSD, Percent_of_Expected), names_to = "Native Peak Areas", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
   
-  result <- calcs(ISTD_areas, expected_ISTD)
-  #can replace this w saving necessary values, writing to sheet
-  avg_ISTD <- result[[1]]
-  stddev_ISTD <- result[[2]]
-  percent_ISTD <- result[[3]]
+  ISTD_df <- ISTD_df %>% 
+    pivot_longer(cols = c(Average, Std_Dev, RSD, Percent_of_Expected), names_to = "ISTD Peak Areas", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
+
   
-  #calculate native/ISTD ratio for avgs
   
-  #calculate relative response for each analyte for each ngml run
+  
+  ### THESE AREN'T GOING TO WORK BELOW, TRYING TO PUT FULL COLUMN IN ONE SPACE AND DIVIDE LIST BY NUMBER 
+  
+  #calculate RR for each run
+  RR_df <- tibble(
+    Analyte = analyte_cols
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Relative_Response = cal_data[[Analyte]] / cal_data[[istd_cols[[Analyte]]]]
+    ) %>%
+    ungroup()  %>% 
+    pivot_longer(cols = rownames(cal_data), names_to = "Relative Response", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
+  
+  #measured concentration = RR / slope
+  conc_df <- tibble(
+    Analyte = analyte_cols
+  ) %>%
+    rowwise() %>%
+    mutate(
+      Measured_Conc = RR_df[[Analyte]] / slopes_df[[Analyte]]
+    ) %>%
+    ungroup()  %>% 
+    pivot_longer(cols = c(rownames(cal_data), Average, Percent_Difference, Accuracy), names_to = "Measured Conc (ng/ml)", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value)
   
 }
 
@@ -62,46 +86,36 @@ import_method_val <- function() {
   # Download the file
   drive_download(as_id(cur_MV), path = temp_file, overwrite = TRUE)
   
-  ####### currently, slopes are transposed as final row: change this? #######
-  slope_sheet <- read_excel(temp_file, sheet = 10)
-  slopes <- as.numeric(slope_sheet[length(slope_sheet[[2]]), ])
+  #read slopes into dataframe
+  sheets <- getSheetNames(temp_file)
+  name <- "Slope and R"
+  if ("SLOPE and R" %in% sheets)
+    name <- "SLOPE and R"
+  slope_df <- read.xlsx(temp_file, sheet = name)
   
+  if ("Slope" %in% colnames(slope_df)) {
+    #remove last two lines (transposed slopes)
+    slope_df <- slope_df[1:num_analytes, ]
+    slope_df["Slope"] <- data.frame(lapply(slope_df["Slope"], as.numeric))
+    ### if trying to let old format work too, must transpose df here ###
+  } else {
+    rownames(slope_df) <- slope_df[[1]]
+    slope_df[1] <- NULL
+    slope_df[1, ] <- data.frame(lapply(slope_df[1, ], as.numeric))
+  }
+    
   #get expected values for QAQC calcs
-  MV_native_data <- read_excel(temp_file, sheet = 4)
-  MV_ISTD_data <- read_excel(temp_file, sheet = 5)
+  name <- "Variations"
+  ### if trying to let old format work too, must split btwn native and istd here ###
+  var_df <- read.xlsx(temp_file, sheet = name)
   #unlink temp file to delete
   unlink(temp_file)
   
-  #find which row the average (expected) values are in
-  avg_row <- -1
-  for (index in 1:length(MV_native_data[[1]])) {
-    if (grepl("AVERAGE", MV_native_data[[1]][index], ignore.case = TRUE)) {
-      avg_row <- index
-    }
-  }
-  #check if expected values could be found
-  if (avg_row == -1) {
-    paste("ERROR: could not find average values in spreadsheet")
-    return (FALSE)
-  }
-  #analyte is row 1, col i: create list with analyte: expected value pairs
-  
-  # Extract analyte names from first row (excluding first column)
-  analyte_names <- as.character(MV_native_data[1, -1])
-  # Extract numeric values from row `avg_row` (excluding first column)
-  analyte_values <- as.numeric(MV_native_data[avg_row, -1])
-  # Create named vector
-  expected_native <- setNames(analyte_values, analyte_names)
-  
-  # Extract analyte names from first row (excluding first column)
-  analyte_names <- as.character(MV_ISTD_data[1, -1])
-  # Extract numeric values from row `avg_row` (excluding first column)
-  analyte_values <- as.numeric(MV_ISTD_data[avg_row, -1])
-  # Create named vector
-  expected_ISTD <- setNames(analyte_values, analyte_names)
-  
-  ### CHECK IF THE ANALYTES ARE ALWAYS IN THE SAME ORDER (for slopes)###
-  
+  #separate variation data into native & ISTD std dataframes
+  ### lots of hard coding in the sheet names/rows for data here :/
+  expected_native <- var_df[1:3, ]
+  expected_ISTD <- var_df[5:7, ]
+
   return (list(expected_native, expected_ISTD, slopes))
 }
 
@@ -109,28 +123,33 @@ main <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
-  #using google drive library (already imported), find raw data file
-  file_path <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type="folder")
-
-  ######## currently just using most recently created file in LC-MS/MS folder ########
-  cur_files <- drive_ls(file_path, orderBy = "createdTime desc")
-  file_name <- unlist(cur_files[1, "name"])
-  file_id <- unlist(cur_files[1, "id"])
-
-  # Extract date from file name (most recent file currently doesn't match this format)
-  date_from_name <- as.Date(str_extract(file_name, "^\\d{8}"), "%Y%m%d")
+  #get most recent method val raw data
+  file_path <- drive_find(pattern = "Processed Data", shared_drive = "SWEL Lab", type="folder")
+  files <- drive_ls(file_path, orderBy = "createdTime desc")
+  
+  #check if there are any files in the folder
+  if (nrow(files) == 0) {
+    print("ERROR: Please enter your raw data into a new Excel File in the 'Method Validations' folder")
+    return()
+  } 
+  #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN THE FOLDER (could prompt for filename)
+  cur_file <- files[1, ]
+  file_id <- unlist(cur_file[["id"]])
   
   #read data from csv at full_path
   temp_file <- tempfile(fileext = ".xlsx")
   drive_download(as_id(file_id), path = temp_file, overwrite = TRUE)
-  raw_data <- read_excel(temp_file, sheet = 1) #raw data currently in sheet 1
-  all_data <- read_into_dataframe(raw_data)
-  unlink(temp_file)
+  raw_data <- readWorkbook(temp_file, sheet = 1) #raw data currently in sheet 1
   
   #get expected values from relevant (most recent) method val
-  method_val_data <- import_method_val()
+  mv_data <- import_method_val()
+  expected_native <- mv_data[1]
+  expected_ISTD <- mv_data[2]
+  slopes_df <- mv_data[3]
   
   ###QAQC(all_data) 
+  
+  unlink(temp_file)
 }
 
 main()
