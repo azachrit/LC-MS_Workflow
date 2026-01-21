@@ -1,25 +1,30 @@
 #header file for shared functions, 11/12/2025
+# Updated 1/21/2026
 # Alicia Melotik
 
-library(openxlsx)
+library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/4.2.8.1
 library(googledrive) #https://googledrive.tidyverse.org/
-library(tidyverse)
+library(tidyverse)   #https://github.com/tidyverse/tidyverse
 
 read_into_dataframe <- function(raw_data) {
   ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
   all_data <- raw_data
   
   #create column names for data frame
-  for (i in 3:7) {
-    colnames(all_data)[i] = raw_data[1, i]
+  for (i in 2:6) {
+    if (!is.na(raw_data[1, i]))
+      colnames(all_data)[i] = raw_data[1, i]
   }
 
-  #remove first row of data frame (were just set as column names)
+  #remove first row of data frame (necessary ones were just set as column names)
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
   #make the row names the trial names and remove data irrelevant to calculations
   rownames(all_data) <- all_data$Name
-  all_data[, 1:5] <- NULL
+  #remove columns before "level" column and one after
+  while (colnames(all_data)[1] != "Level") {
+    all_data[, 1] <- NULL
+  }
   all_data[, 2] <- NULL
   
   #force blank levels to 0, and make all levels numeric instead of char
