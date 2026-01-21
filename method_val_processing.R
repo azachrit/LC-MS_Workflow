@@ -1,4 +1,5 @@
-# Method Val Draft R Script, 11/3/25
+# Method Val Draft R Script, 11/3/2025
+# Updated 1/21/2026
 # Alicia Melotik
 
 # NOTE ON LINEARITY:
@@ -47,6 +48,14 @@ calc_slopes <- function(all_data) {
     
     #linear model regression from Alison's draft r script
     cal_reg <- lm(RR ~ 0 + Level, data = df_summary) ## added "0 +" forces line through origin 
+    
+    #Plot Cal Curve data & Regression Line
+    ggplot(df_summary, aes(Level, RR))+
+          geom_point()+
+          geom_smooth(method = lm, formula = y ~ 0 + x)+
+          labs(title = paste(analyte, "Regression"))+
+          theme_classic()
+    
     slope <- coef(cal_reg)[["Level"]]
     r2 <- summary(cal_reg)$r.squared
     
@@ -193,12 +202,12 @@ upload_mv <- function() {
   googledrive::drive_auth()
   
   #get most recent method val raw data
-  file_path <- drive_find(pattern = "Method Validations", shared_drive = "SWEL Lab", type="folder")
+  file_path <- drive_find(pattern = "Processed Method Val Files", shared_drive = "SWEL Lab", type="folder")
   files <- drive_ls(file_path, orderBy = "createdTime desc")
 
   #check if there are any files in the folder
   if (nrow(files) == 0) {
-    print("ERROR: Please enter your raw data into a new Excel File in the 'Method Validations' folder")
+    print("ERROR: Please enter your raw data into a new Excel File in the 'Processed Method Val Files' folder")
     return()
   } 
   #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN METHOD VAL FOLDER
@@ -213,6 +222,8 @@ upload_mv <- function() {
   #perform relevant operations on data using functions
   all_data <- read_into_dataframe(raw_data)
   get_shared_vars(all_data)
+  #view(raw_data)
+  #view(all_data)
   
   result <- calc_slopes(all_data)
   slopes_df <- result[[1]]
@@ -243,7 +254,7 @@ upload_mv <- function() {
   writeData(wb, "Peak Areas", native_avg_table, rowNames = TRUE, headerStyle = hs1)
   writeData(wb, "Peak Areas", ISTD_avg_table, rowNames = TRUE, startCol = num_analytes + 3, headerStyle = hs1)
   writeData(wb, "Peak Areas", N2Iratio_table, rowNames = TRUE, startRow = num_levels + 3, headerStyle = hs1)
-  #add table names for clarity
+  #add table names for clarity at top left of each table
   writeData(wb, "Peak Areas", "Avg Native Peak Areas", startCol = 1, startRow = 1)
   writeData(wb, "Peak Areas", "Avg ISTD Peak Areas", startCol = num_analytes + 3, startRow = 1)
   writeData(wb, "Peak Areas", "Relative Reponse", startCol = 1, startRow = num_levels + 3)
@@ -264,13 +275,16 @@ upload_mv <- function() {
   writeData(wb, "Slope and R", slopes_df, rowNames = TRUE, headerStyle = hs1)
   
   #adjust all column widths so they're readable
+  #first sheet is always raw data (for now)
+  first <- 1
   for (sheet_name in names(wb)) {
     num_cols <- ncol(readWorkbook(wb, sheet = sheet_name, colNames = FALSE, rows = 1)) + 1
     #don't adjust spacing for first sheet with raw input, doesn't work well
-    if ((sheet_name == "RAW") | (sheet_name == "Sheet1")) {
-      next
-    }
-    setColWidths(wb, sheet=sheet_name, cols = 1:num_cols, widths="auto")
+    if (first == 1) {
+      names(wb)[[1]] <- "Raw Data"
+      first <- 0
+    } else
+      setColWidths(wb, sheet=sheet_name, cols = 1:num_cols, widths="auto")
   }
 
   #using google drive library (already imported), update file that raw data was pulled from
@@ -282,6 +296,10 @@ upload_mv <- function() {
 
   #delete temp file now that it has been uploaded
   unlink(temp_file)
+  
+  #store data in tracking sheet
+  tracking_sheet <- drive_find(pattern = "Method Validation Metric Tracking", shared_drive = "SWEL Lab")
+  
 }
 
 upload_mv()
