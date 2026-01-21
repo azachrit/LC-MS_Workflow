@@ -110,11 +110,11 @@ variation_calcs <- function(all_data) {
   return (list(native_var_df, ISTD_var_df))
 } 
 
-conc_calcs <- function(all_data, slopes) {
+conc_calcs <- function(all_data, slopes, sample_conc) {
   #measured conc = RR/slope
   #### currently doing it exactly like 7/22 and 8/22 examples: 
-  ####       not using avgs and only using blanks and 50 ng/l samples ####
-  replicate_data <- all_data %>% filter(Level == 0 | Level == 0.05)
+  ####       not using avgs and only using blanks and chosen level samples ####
+  replicate_data <- all_data %>% filter(Level == 0 | Level == sample_conc)
 
   #for each replicate sample, calculate RR and use prior calculated slope to get conc
   conc_df <- matrix(nrow = nrow(replicate_data), ncol = num_analytes + 1, 
@@ -175,9 +175,10 @@ LOB <- function(conc_df) {
   return (LOB_df)
 }
 
-LOD_LOQ <- function(conc_df, LOB_df) {
-  #LoD = LoB + (1.645 * std dev of 50 ng/L replicates)
-  replicate_data <- conc_df %>% filter(Level == 0.05)
+LOD_LOQ <- function(conc_df, LOB_df, LOD_conc) {
+  #LoD = LoB + (1.645 * std dev of chosen replicates)
+  replicate_data <- conc_df %>% filter(Level == LOD_conc)
+
   LOD_table <- tibble(
     Analyte = analyte_cols
   ) %>%
@@ -211,7 +212,7 @@ upload_mv <- function() {
     return()
   } 
   #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN METHOD VAL FOLDER
-  cur_file <- files[1, ]
+  cur_file <- files[3, ]
   file_id <- unlist(cur_file[["id"]])
   
   #read data from csv at full_path
@@ -238,10 +239,31 @@ upload_mv <- function() {
   
   accuracy_df <- accuracy(slopes_df, native_var_df, ISTD_var_df)
   
-  conc_df <- as.data.frame(conc_calcs(all_data, slopes_df))
+  #ASK FOR CONC TO CALCULATE LOD WITH
+  LOD_conc <- NA
+  while (is.na(LOD_conc)) {
+    LOD_conc <- readline(prompt = "Concentration to use for LOD/LOQ calculations: ")
+    LOD_conc <- suppressWarnings(as.numeric(LOD_conc))
+    if (is.na(LOD_conc))
+      next
+    
+    if (LOD_conc > 1) {
+      LOD_conc <- LOD_conc / 1000.0
+    } 
+    level_options <- unique(unlist(all_data[["Level"]]))
+    if (!(LOD_conc %in% level_options)) {
+      print("Error: Please enter a concentration/level present in the data")
+      print("Choices (in ng/L): ")
+      print(unique(unlist(lapply(level_options, function(x) x * 1000))))
+      LOD_conc <- NA
+    }
+  }
+  
+  
+  conc_df <- as.data.frame(conc_calcs(all_data, slopes_df, LOD_conc))
   
   LOB_df <- LOB(conc_df)
-  LOD_LOQ_df <- LOD_LOQ(conc_df, LOB_df)
+  LOD_LOQ_df <- LOD_LOQ(conc_df, LOB_df, LOD_conc)
   
   #add relevant data to temp file through openxlsx workbook
   hs1 <- createStyle(halign = "justify", textDecoration = "Bold", border = "TopBottomLeftRight", fontColour = "black")
@@ -288,7 +310,7 @@ upload_mv <- function() {
   }
 
   #using google drive library (already imported), update file that raw data was pulled from
-  new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "-Method_Val.xlsx")
+  new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_Method_Val.xlsx")
   
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
