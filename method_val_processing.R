@@ -113,7 +113,7 @@ variation_calcs <- function(all_data) {
 conc_calcs <- function(all_data, slopes, sample_conc) {
   #measured conc = RR/slope
   #### currently doing it exactly like 7/22 and 8/22 examples: 
-  ####       not using avgs and only using blanks and chosen level samples ####
+  ####       not using avgs and only using blanks and samples of chosen level (sample_conc)###
   replicate_data <- all_data %>% filter(Level == 0 | Level == sample_conc)
 
   #for each replicate sample, calculate RR and use prior calculated slope to get conc
@@ -212,7 +212,7 @@ upload_mv <- function() {
     return()
   } 
   #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN METHOD VAL FOLDER
-  cur_file <- files[3, ]
+  cur_file <- files[1, ]
   file_id <- unlist(cur_file[["id"]])
   
   #read data from csv at full_path
