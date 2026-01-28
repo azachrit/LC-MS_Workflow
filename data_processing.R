@@ -1,5 +1,5 @@
 # LC-MS data file input, 11/3/25
-# Updated 1/26/2026
+# Updated 1/28/2026
 # Alicia Melotik
 
 #include functions and libraries from header file
@@ -20,50 +20,54 @@ import_method_val <- function() {
   #read slopes into dataframe
   sheets <- getSheetNames(temp_file)
   name <- "Slope and R"
-  if (name %in% sheets) {
+  if (name %in% sheets) { # NEW FORMAT
     slope_df <- read.xlsx(temp_file, sheet = name)
-  } else {
+  } else { # OLD FORMAT
     slope_df <- read.xlsx(temp_file, sheet = sheets[length(sheets)-1])
     slope_df <- slope_df[length(slope_df[1])-2:length(slope_df[1]), ] 
   }
   
   
-  if ("Slope" %in% colnames(slope_df)) {
+  if ("Slope" %in% colnames(slope_df)) { # OLD FORMAT
     #remove last two lines (transposed slopes)
     slope_df <- slope_df[1:num_analytes, ]
     slope_df["Slope"] <- data.frame(lapply(slope_df["Slope"], as.numeric))
     ### if trying to let old format work too, must transpose df here ###
-  } else {
-    #rownames(slope_df) <- slope_df[[1]]
-    #slope_df[1] <- NULL
-    slope_df[1, 2:length(slope_df[1, ])] <- data.frame(lapply(slope_df[1, 2:length(slope_df[1, ])], as.numeric))
+  } else { # NEW FORMAT
+    slope_df <- slope_df[1, ]
+    rownames(slope_df) <- slope_df[[1]]
+    slope_df[1] <- NULL
     
-    
+    #slope_df[1, 2:length(slope_df[1, ])] <- data.frame(lapply(slope_df[1, 2:length(slope_df[1, ])], as.numeric))
   }
   
   #get expected values for QAQC calcs
   name <- "Variations"
-  if (name %in% sheets) {
+  if (name %in% sheets) { # NEW FORMAT
     var_df <- read.xlsx(temp_file, sheet = name)
     ### lots of hard coding in the sheet names/rows for data here :/
     expected_native <- var_df[1:3, ]
     expected_ISTD <- var_df[5:7, ]
-  } else {
+  } else { # OLD FORMAT
     ### if trying to let old format work too, must split btwn native and istd here ###
     expected_native <- read.xlsx(temp_file, sheet = "NATIVE STD VARIATIONS")
     expected_ISTD <- read.xlsx(temp_file, sheet = "ISTD VARIATIONS")
   }
   
+  #get LOD, LOB, LOQ
+  # DID NOT WORRY ABT OLD FORMAT FOR THIS PART AT ALL
+  limits_df <- read.xlsx(temp_file, sheet = "LOB LOD")
+  limits_df <- limits_df[-1:-4, ] # remove lob data (avg, std) and just keep relevant values
+  #convert to numeric
+  limits_df[] <- lapply(limits_df, as.numeric)
+  
   #unlink temp file to delete
   unlink(temp_file)
   
-  return (list(expected_native, expected_ISTD, slope_df))
+  return (list(expected_native, expected_ISTD, slope_df, limits_df))
 }
 
-QAQC <- function(all_data, expected_native, expected_ISTD, slope_df) {
-  #find row indices of 1 NGML samples
-  indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE)
-  cal_data <- all_data[indices, ]
+QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df) {
   tib <- tibble(
     Analyte = analyte_cols
   ) %>% rowwise()
@@ -122,12 +126,65 @@ QAQC <- function(all_data, expected_native, expected_ISTD, slope_df) {
 }
 
 peak_areas <- function(all_data, native_df, ISTD_df, slope_df, LOD) {
-  corrected_areas <- all_data
   # need corrected RR_df and conc_df
   to_ratio <- function(x) as.numeric(x)/100
   native_ratio <- lapply(native_df[4, -1], to_ratio) #the -1 removes the first column (which says percent of expected)
   ISTD_ratio <- lapply(ISTD_df[4, -1], to_ratio)
   
+  #divide each row by the native or ISTD ratio
+  corrected_native <- as.data.frame(mapply('/', all_data[, analyte_cols], native_ratio))
+  corrected_ISTD <- as.data.frame(mapply('/', all_data[, istd_cols], ISTD_ratio))
+  
+  #calculate new concentrations using corrected areas ratio divided by method val slope
+  corrected_RR_df <- corrected_native / corrected_ISTD
+  corrected_conc_df <- mapply('/', corrected_RR_df, slope_df)
+  #indicate where conc < LOD within dataframe
+  ### if want to make a plot here, replace <LOD w/ NA and redo before exporting table
+  corrected_conc_df[] <- mapply(
+    function(conc, lod) ifelse(conc < lod, NA, conc),
+    corrected_conc_df,
+    LOD,
+    SIMPLIFY = TRUE
+  )
+  #for exporting? set NAs to strings
+  corrected_conc_df[] <- mapply(
+    function(conc) ifelse(is.na(conc), "< LOD", conc),
+    corrected_conc_df,
+    SIMPLIFY = TRUE
+  )
+  
+}
+
+blank_subs <- function(corrected_conc_df, LOB) {
+  #calc 95(?)% confidence interval for maximal blank concentrations
+  blank_vec <- corrected_conc_df[1, ]
+  maximal_blank <- mapply(
+    function(blank, lob) ifelse(is.na(blank), 0, blank + (lob * 1.895)),
+    blank_vec,
+    LOB,
+    SIMPLIFY = TRUE
+  )
+  #subtract maximal blank conc from blanks
+  blank_vec[] <- mapply(
+    function(blank, maximal_blank) ifelse(is.na(blank), 0, blank - maximal_blank),
+    blank_vec,
+    maximal_blank #does this need SIMPLIFY too?
+  )
+  #perform CI again
+  maximal_blank <- mapply(
+    function(blank, lob) ifelse(is.na(blank), 0, blank + (lob * 1.895)),
+    blank_vec,
+    LOB,
+    SIMPLIFY = TRUE
+  )
+  #apply blank subtractions
+  corrected_conc_df[] <- mapply(
+    function(conc, lob) ifelse(is.na(conc), 0, conc + (lob * 1.895)),
+    corrected_conc_df,
+    LOB,
+    SIMPLIFY = TRUE
+  )
+    
 }
 
 main <- function() {
@@ -143,7 +200,7 @@ main <- function() {
     print("ERROR: Please enter your raw data into an Excel File in the 'Processed Data' folder")
     return()
   } 
-  #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN THE FOLDER (could prompt for filename)
+  #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN THE FOLDER (could prompt for filename or date)
   cur_file <- files[1, ]
   file_id <- unlist(cur_file[["id"]])
   
@@ -158,17 +215,29 @@ main <- function() {
   
   #get expected values from relevant (most recent) method val
   mv_data <- import_method_val()
-  expected_native <- mv_data[1]
-  expected_ISTD <- mv_data[2]
-  slope_df <- mv_data[3]
-  #ALSO NEED LOD and LOB
+  expected_native <- as.data.frame(mv_data[1])
+  expected_ISTD <- as.data.frame(mv_data[2])
+  slope_df <- as.data.frame(mv_data[3])
+  limits_df <- as.data.frame(mv_data[4])
   
-  QAQC_data <- QAQC(all_data, expected_native, expected_ISTD, slope_df)
-  native_df <- QAQC_data[1]
-  ISTD_df <- QAQC_data[2]
-  RR_df <- QAQC_data[3]
-  conc_df <- QAQC_data[4]
+  #find row indices of 1 NGML samples
+  indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE)
+  cal_data <- all_data[indices, ]
+  #remove 1 NGML samples from all_data
+  indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE, invert = TRUE)
+  all_data <- all_data[indices, ]
   
+  QAQC_data <- QAQC(cal_data, expected_native, expected_ISTD, slope_df)
+  native_df <- as.data.frame(QAQC_data[1])
+  ISTD_df <- as.data.frame(QAQC_data[2])
+  RR_df <- as.data.frame(QAQC_data[3])
+  conc_df <- as.data.frame(QAQC_data[4])
+  
+  #pull LOD vector from limits df
+  rownames(limits_df) <- limits_df[, 1]
+  limits_df <- limits_df[, -1]
+  LOD <- limits_df["LOD", ]
+  LOB <- limits_df["LOB", ]
   
   
   unlink(temp_file)
