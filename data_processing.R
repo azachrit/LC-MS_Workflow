@@ -1,5 +1,5 @@
 # LC-MS data file input, 11/3/25
-# Updated 1/28/2026
+# Updated 2/1/2026
 # Alicia Melotik
 
 #include functions and libraries from header file
@@ -146,46 +146,49 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df, LOD) {
     LOD,
     SIMPLIFY = TRUE
   )
-  #for exporting? set NAs to strings
-  corrected_conc_df[] <- mapply(
-    function(conc) ifelse(is.na(conc), "< LOD", conc),
-    corrected_conc_df,
-    SIMPLIFY = TRUE
-  )
-  
+  return (corrected_conc_df)
 }
 
 blank_subs <- function(corrected_conc_df, LOB) {
   #calc 95(?)% confidence interval for maximal blank concentrations
-  blank_vec <- corrected_conc_df[1, ]
+  if (ncol(corrected_conc_df) != length(LOB)) {
+    print("ERROR: LOB has different amount of analytes from the dataframe")
+    return
+  }
+  #force NAs to 0 to not impede calculations
+  corrected_conc_df[is.na(corrected_conc_df)] <- 0
+  
+  # calculate maximal blank (first row)
+  blank_vals <- as.numeric(corrected_conc_df[1, , drop = TRUE])
+  maximal_blank <- blank_vals + (LOB * 1.895)
+  
+  corrected_conc_df <- as.matrix(corrected_conc_df)
+  
+  # apply blank subtraction column-wise
+  corrected_conc_df[] <- pmax(
+    sweep(corrected_conc_df, 2, maximal_blank, FUN = "-"),
+    0 #floor at zero using pmax so the concentrations cannot be negative
+  )
+  
   maximal_blank <- mapply(
     function(blank, lob) ifelse(is.na(blank), 0, blank + (lob * 1.895)),
-    blank_vec,
+    as.list(corrected_conc_df[1, ]), #blank vector is first row of samples
     LOB,
     SIMPLIFY = TRUE
   )
-  #subtract maximal blank conc from blanks
-  blank_vec[] <- mapply(
-    function(blank, maximal_blank) ifelse(is.na(blank), 0, blank - maximal_blank),
-    blank_vec,
-    maximal_blank #does this need SIMPLIFY too?
-  )
-  #perform CI again
-  maximal_blank <- mapply(
-    function(blank, lob) ifelse(is.na(blank), 0, blank + (lob * 1.895)),
-    blank_vec,
-    LOB,
-    SIMPLIFY = TRUE
-  )
+  maximal_blank <- as.list(maximal_blank)
+  
   #apply blank subtractions
   corrected_conc_df[] <- mapply(
-    function(conc, lob) ifelse(is.na(conc), 0, conc + (lob * 1.895)),
+    function(conc, blank) ifelse(is.na(conc), 0, ifelse(conc - blank < 0, 0, conc - blank)),
     corrected_conc_df,
-    LOB,
+    maximal_blank,
     SIMPLIFY = TRUE
   )
-    
+  return (corrected_conc_df)
 }
+
+
 
 main <- function() {
   ### ----Authenticate to Google Drive-------- ###
@@ -238,6 +241,21 @@ main <- function() {
   limits_df <- limits_df[, -1]
   LOD <- limits_df["LOD", ]
   LOB <- limits_df["LOB", ]
+  
+  #peak areas
+  corrected_conc_df <- peak_areas(all_data, native_df, ISTD_df, slope_df, LOD)
+  ### for exporting? set NAs to strings
+  #corrected_conc_df[] <- mapply(
+  #  function(conc) ifelse(is.na(conc), "< LOD", conc),
+  #  corrected_conc_df,
+  #  SIMPLIFY = TRUE
+  #)
+  
+  #perform blank subtractions x2, first time to standardize, second time to subtract blank vals
+  corrected_conc_df[] <- blank_subs(corrected_conc_df, LOB)
+  corrected_conc_df[] <- blank_subs(corrected_conc_df, LOB)
+  
+  
   
   
   unlink(temp_file)
