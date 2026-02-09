@@ -1,6 +1,11 @@
-# LC-MS data file input, 11/3/25
-# Updated 2/1/2026
-# Alicia Melotik
+## ---------------------------------------------------------
+## data_processing.R 
+##
+## Purpose: Automate LCMS/MS data processing
+## Author: Alicia Melotik
+## Date Created: 11/3/2025
+## Date Modified: 2/9/2026
+## ---------------------------------------------------------
 
 #include functions and libraries from header file
 source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
@@ -57,8 +62,10 @@ import_method_val <- function() {
   #get LOD, LOB, LOQ
   # DID NOT WORRY ABT OLD FORMAT FOR THIS PART AT ALL
   limits_df <- read.xlsx(temp_file, sheet = "LOB LOD")
-  limits_df <- limits_df[-1:-4, ] # remove lob data (avg, std) and just keep relevant values
+  limits_df <- limits_df[-1:-4, ] # remove additional lob data (avg, std) and just keep relevant values
   #convert to numeric
+  rownames(limits_df) <- limits_df[, 1]
+  limits_df <- limits_df[, -1]
   limits_df[] <- lapply(limits_df, as.numeric)
   
   #unlink temp file to delete
@@ -157,34 +164,17 @@ blank_subs <- function(corrected_conc_df, LOB) {
   }
   #force NAs to 0 to not impede calculations
   corrected_conc_df[is.na(corrected_conc_df)] <- 0
+  corrected_conc_df <- as.matrix(corrected_conc_df)
   
   # calculate maximal blank (first row)
   blank_vals <- as.numeric(corrected_conc_df[1, , drop = TRUE])
   maximal_blank <- blank_vals + (LOB * 1.895)
   
-  corrected_conc_df <- as.matrix(corrected_conc_df)
-  
-  # apply blank subtraction column-wise
-  corrected_conc_df[] <- pmax(
-    sweep(corrected_conc_df, 2, maximal_blank, FUN = "-"),
-    0 #floor at zero using pmax so the concentrations cannot be negative
-  )
-  
-  maximal_blank <- mapply(
-    function(blank, lob) ifelse(is.na(blank), 0, blank + (lob * 1.895)),
-    as.list(corrected_conc_df[1, ]), #blank vector is first row of samples
-    LOB,
-    SIMPLIFY = TRUE
-  )
-  maximal_blank <- as.list(maximal_blank)
-  
-  #apply blank subtractions
-  corrected_conc_df[] <- mapply(
-    function(conc, blank) ifelse(is.na(conc), 0, ifelse(conc - blank < 0, 0, conc - blank)),
-    corrected_conc_df,
-    maximal_blank,
-    SIMPLIFY = TRUE
-  )
+  #repeat maximal_blank rows to reshape to size of conc_df and perform subtractions
+  maximal_blank <- maximal_blank[rep(seq_len(nrow(maximal_blank)), nrow(corrected_conc_df)), ]
+  corrected_conc_df <- corrected_conc_df - maximal_blank
+  corrected_conc_df[corrected_conc_df < 0] <- 0 #floor at zero
+ 
   return (corrected_conc_df)
 }
 
@@ -237,8 +227,6 @@ main <- function() {
   conc_df <- as.data.frame(QAQC_data[4])
   
   #pull LOD vector from limits df
-  rownames(limits_df) <- limits_df[, 1]
-  limits_df <- limits_df[, -1]
   LOD <- limits_df["LOD", ]
   LOB <- limits_df["LOB", ]
   
