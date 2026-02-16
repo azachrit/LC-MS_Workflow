@@ -4,7 +4,7 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 2/9/2026
+## Date Modified: 2/16/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
@@ -175,10 +175,19 @@ blank_subs <- function(corrected_conc_df, LOB) {
   corrected_conc_df <- corrected_conc_df - maximal_blank
   corrected_conc_df[corrected_conc_df < 0] <- 0 #floor at zero
  
-  return (corrected_conc_df)
+  return (as.data.frame(corrected_conc_df))
 }
 
-
+check_LOQ <- function(corrected_conc_df, LOQ) {
+  #using LOQ for each analyte, indicate where data is below the threshold
+  corrected_conc_df[] <- mapply(
+    function(conc, loq) ifelse(is.na(conc), "<LOQ", ifelse(conc < loq, "<LOQ", conc)),
+    corrected_conc_df,
+    LOQ,
+    SIMPLIFY = TRUE
+  )
+  return (corrected_conc_df)
+}
 
 main <- function() {
   ### ----Authenticate to Google Drive-------- ###
@@ -226,9 +235,10 @@ main <- function() {
   RR_df <- as.data.frame(QAQC_data[3])
   conc_df <- as.data.frame(QAQC_data[4])
   
-  #pull LOD vector from limits df
+  #pull LOD/B/Q vector from limits df
   LOD <- limits_df["LOD", ]
   LOB <- limits_df["LOB", ]
+  LOQ <- limits_df["LOQ", ]
   
   #peak areas
   corrected_conc_df <- peak_areas(all_data, native_df, ISTD_df, slope_df, LOD)
@@ -240,10 +250,10 @@ main <- function() {
   #)
   
   #perform blank subtractions x2, first time to standardize, second time to subtract blank vals
-  corrected_conc_df[] <- blank_subs(corrected_conc_df, LOB)
-  corrected_conc_df[] <- blank_subs(corrected_conc_df, LOB)
-  
-  
+  corrected_conc_df <- blank_subs(corrected_conc_df, LOB)
+  corrected_conc_df <- blank_subs(corrected_conc_df, LOB)
+  #set rownames to be the sample names
+  rownames(corrected_conc_df) <- rownames(all_data)
   
   
   unlink(temp_file)
