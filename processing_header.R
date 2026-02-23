@@ -66,6 +66,6 @@ get_shared_vars <- function(all_data) {
     Analyte = analyte_cols,
     ISTD = istd_cols
   )
-  mapping <<- arrange(mapping, Analyte)
+  mapping <<- mapping %>% arrange(tolower(Analyte))
 }
 

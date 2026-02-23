@@ -39,7 +39,7 @@ slope_calcs <- function(all_data) {
   RR_summary[, 1] <- native_summary[, 1] #fix the first column to contain the levels, not level / level
   
   #set up empty matrix to hold slopes
-  slopes <- matrix(nrow = 2, ncol = ncol(caldata), dimnames = list(c("Slope", "R2"), mapping[["Analyte"]]))
+  slopes <- matrix(nrow = 2, ncol = ncol(native_summary) - 1, dimnames = list(c("Slope", "R2"), mapping[["Analyte"]]))
   
   #loop through each analyte to calculate each slope and create plot
   for (analyte in mapping[["Analyte"]]) {
@@ -263,10 +263,13 @@ main <- function() {
 
   #### CALCULATIONS DONE, NOW WRITE DATA TO EXCEL SHEET ####
   
-  #add relevant data to temp file through openxlsx workbook
-  hs1 <- createStyle(halign = "justify", textDecoration = "Bold", border = "TopBottomLeftRight", fontColour = "black")
-
+  #set up global style formatting for workbook
   wb <- loadWorkbook(temp_file, na.convert = FALSE)
+  modifyBaseFont(wb, fontName = "Times New Roman")
+  options("openxlsx.numFmt" = "0.000")
+  hs1 <- createStyle(halign = "justify", textDecoration = "Bold", fontName = "Calibri", fontColour = "black", fgFill = "#e3e1e5")
+  
+  #add relevant data to temp file through openxlsx workbook
   addWorksheet(wb, "Condensed Data")
   writeData(wb, "Condensed Data", all_data, rowNames = TRUE, headerStyle = hs1)
 
