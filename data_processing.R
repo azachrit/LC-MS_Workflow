@@ -4,7 +4,7 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 2/16/2026
+## Date Modified: 3/2/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
@@ -165,15 +165,28 @@ blank_subs <- function(corrected_conc_df, LOB) {
   return (as.data.frame(corrected_conc_df))
 }
 
-check_limit <- function(conc_df, limit_vec, default) {
+#COLUMNS MUST HAVE CONSISTENT TYPES, SO THIS COERCES ALL TO STRINGS
+check_limit <- function(concentration_df, limit_vec, default) {
   #using LOQ for each analyte, indicate where data is below the threshold
-  conc_df[] <- mapply(
-    function(conc, limit) ifelse(is.na(conc), default, ifelse(conc < limit, default, as.numeric(conc))),
-    conc_df,
+  concentration_df[] <- mapply(
+    function(conc, limit) ifelse(is.na(conc), default, ifelse(conc < limit, default, conc)),
+    concentration_df,
     limit_vec,
     SIMPLIFY = TRUE
   )
-  return (as.data.frame(conc_df))
+  return (as.data.frame(concentration_df))
+}
+
+check_btwn_limits <- function(concentration_df, LOD, LOQ, default) {
+  #using LOQ for each analyte, indicate where data is below the threshold
+  concentration_df[] <- mapply(
+    function(conc, limit_1, limit_2) ifelse(is.na(conc), NA, ifelse(conc > limit_1 & conc < limit_2, default, conc)),
+    concentration_df,
+    LOD,
+    LOQ,
+    SIMPLIFY = TRUE
+  )
+  return (as.data.frame(concentration_df))
 }
 
 main <- function() {
@@ -232,12 +245,6 @@ main <- function() {
   corrected_conc_df <- peak_areas(all_data, native_df, ISTD_df, slope_df)
   ### for exporting? set NAs to strings
   #corrected_conc_df[is.na] <- "< LOD"
-  # or
-  #corrected_conc_df[] <- mapply(
-  #  function(conc) ifelse(is.na(conc), "< LOD", conc),
-  #  corrected_conc_df,
-  #  SIMPLIFY = TRUE
-  #)
   
   #perform blank subtractions x2, first time to standardize, second time to subtract blank vals
   blank_sub_df <- blank_subs(corrected_conc_df, LOB)
@@ -245,8 +252,11 @@ main <- function() {
   #set rownames to be the sample names
   rownames(blank_sub_df) <- rownames(all_data)
   rownames(blank_sub_df_2) <- rownames(all_data)
+  #check if 2nd blank subs are below LOD?
   
-  LOQ_flags <- check_limit(blank_sub_df_2, LOQ, "<LOQ")
+  export_df <- check_limit(blank_sub_df_2, LOD, "<LoD")
+  
+  LOQ_flags <- check_btwn_limits(blank_sub_df_2, LOD, LOQ, "<LoQ")
   
   
   #### CALCULATIONS DONE, NOW WRITE DATA TO EXCEL SHEET ####
@@ -275,13 +285,11 @@ main <- function() {
   writeData(wb, "QA QC", "Expected ISTD", startRow = 3)
   writeData(wb, "QA QC", "Relative Response", startRow = nrow(native_df) + nrow(ISTD_df) + 9)
   
-  
   addWorksheet(wb, "Peak Areas")
   writeData(wb, "Peak Areas", corrected_conc_df, rowNames = TRUE, headerStyle = hs1)
   # check against lod and reprint to file
-  corrected_conc_df <- check_limit(corrected_conc_df, LOD, "<LOD")
   writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_conc_df) + 3, headerStyle = hs1)
-  writeData(wb, "Peak Areas", corrected_conc_df, rowNames = TRUE, startRow = nrow(corrected_conc_df) + 6, headerStyle = hs1)
+  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_conc_df) + 6, headerStyle = hs1)
   writeData(wb, "Peak Areas", "Concentration (ng/mL)", startCol = 1, startRow = 1)
   writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_conc_df) + 6)
   
@@ -292,8 +300,18 @@ main <- function() {
   writeData(wb, "Blank Subtractions", "Round 2", startCol = , startRow = nrow(blank_sub_df) + 3)
   
   addWorksheet(wb, "Limit of Quantification")
-  writeData(wb, "Limit of Quantification", LOQ_flags, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, headerStyle = hs1)
   writeData(wb, "Limit of Quantification", "Concentration (ng/mL)", startCol = 1, startRow = 1)
+  
+  LOQ_style <- createStyle(fgFill = "#fabf8f") 
+  for (i in seq_len(nrow(LOQ_flags))) {
+    for (j in seq_len(ncol(LOQ_flags))) {
+      if (LOQ_flags[i, j] == "<LoQ") {
+        addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = i + 1, cols = j + 1, gridExpand = FALSE, stack = TRUE)
+        print("added style")
+      }
+    }
+  }
   
   #addWorksheet(wb, "Final Conversions")
   #writeData(wb, "Final Conversions", slope_df, rowNames = TRUE, headerStyle = hs1)
