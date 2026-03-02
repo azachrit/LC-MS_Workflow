@@ -4,7 +4,7 @@
 ## Purpose: clean input and create shared, global variables
 ## Author: Alicia Melotik
 ## Date Created: 11/12/2025
-## Date Modified: 2/4/2026
+## Date Modified: 2/16/2026
 ## ---------------------------------------------------------
 
 library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/4.2.8.1
@@ -68,4 +68,5 @@ get_shared_vars <- function(all_data) {
   )
   mapping <<- mapping %>% arrange(tolower(Analyte))
 }
+
 
