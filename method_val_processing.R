@@ -4,7 +4,7 @@
 ## Purpose: Automate method validation processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 2/16/2026
+## Date Modified: 3/4/2026
 ## ---------------------------------------------------------
 
 # NOTE ON LINEARITY:
@@ -180,15 +180,14 @@ LOD_LOQ_calcs <- function(conc_df, LOB_df, LOD_conc) {
   ) %>%
     rowwise() %>%
     mutate(
-      LOB  = LOB_df[[3, Analyte]],
       sd   = sd(replicate_data[[Analyte]],   na.rm = TRUE),
-      LOD = LOB + (1.645 * sd),
+      LOD = LOB_df[[3, Analyte]] + (1.645 * sd),
       LOQ = pmax(LOD * 3, 0.025)
     ) %>%
     ungroup()
-  #transpose so analytes as column names
+  #transpose so analytes are column names and metrics are rows
   LOD_df <- LOD_table %>% 
-    pivot_longer(cols = c(LOB, sd, LOD, LOQ), names_to = "metric", values_to = "value") %>%
+    pivot_longer(cols = c(sd, LOD, LOQ), names_to = "metric", values_to = "value") %>%
     pivot_wider(names_from = Analyte, values_from = value)
 
   return (LOD_df)
@@ -235,7 +234,7 @@ main <- function() {
   #ASK FOR CONC TO CALCULATE LOD WITH
   LOD_conc <- NA
   while (is.na(LOD_conc)) {
-    LOD_conc <- readline(prompt = "Concentration to use for LOD/LOQ calculations: ")
+    LOD_conc <- readline(prompt = "Enter a replicate level (ng/mL or ng/L) to use for LOD/LOQ calculations: ")
     LOD_conc <- suppressWarnings(as.numeric(LOD_conc))
     if (is.na(LOD_conc))
       next
@@ -243,17 +242,18 @@ main <- function() {
     if (LOD_conc > 1) {
       LOD_conc <- LOD_conc / 1000.0
     } 
+
     level_options <- unique(unlist(all_data[["Level"]]))
     if (!(LOD_conc %in% level_options)) {
-      print("Error: Please enter a concentration/level present in the data")
+      print("Error: Please enter a target/level present in the data")
       print("Choices (in ng/L): ")
       print(unique(unlist(lapply(level_options, function(x) x * 1000))))
       LOD_conc <- NA
     }
   }
   
+  #using chosen replicates, calculate concentrations, LOB, LOD, and LOQ
   conc_df <- as.data.frame(conc_calcs(all_data, slopes_df, LOD_conc))
-  
   LOB_df <- LOB_calcs(conc_df)
   LOD_LOQ_df <- LOD_LOQ_calcs(conc_df, LOB_df, LOD_conc)
   
@@ -301,12 +301,12 @@ main <- function() {
   #first sheet is always raw data (for now)
   first <- 1
   for (sheet_name in names(wb)) {
-    num_cols <- ncol(readWorkbook(wb, sheet = sheet_name, colNames = FALSE, rows = 1)) + 1
+    num_cols <- ncol(readWorkbook(wb, sheet = sheet_name, colNames = FALSE)) + 1
     #don't adjust spacing for first sheet with raw input, doesn't work well
     if (first == 1) {
       names(wb)[[1]] <- "Raw Data"
       first <- 0
-    } else {
+    } else if (num_cols > 0) {
       setColWidths(wb, sheet=sheet_name, cols = 1:num_cols, widths="auto")
     }
   }
