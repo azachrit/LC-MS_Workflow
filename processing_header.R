@@ -4,7 +4,7 @@
 ## Purpose: clean input and create shared, global variables
 ## Author: Alicia Melotik
 ## Date Created: 11/12/2025
-## Date Modified: 2/16/2026
+## Date Modified: 4/13/2026
 ## ---------------------------------------------------------
 
 library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/4.2.8.1
@@ -32,19 +32,14 @@ read_into_dataframe <- function(raw_data) {
   }
   all_data[, 2] <- NULL
   
-  #force blank levels to 0, and make all levels numeric instead of char
-  all_data <- all_data %>% mutate(Level = if_else(is.na(Level), 0, if_else(Level == "", 0, as.numeric(Level)) ))
-  
-  for (i in 2:length(colnames(all_data))) {
-    #make all areas numeric too, not sure why they aren't automatically numbers
-    all_data[i] <- lapply(all_data[i], as.numeric)
-
-    #also, change the automatic X in front of analyte names to A so they are sorted correctly
-    if (startsWith(colnames(all_data)[i], "X")) {
-      name <- colnames(all_data)[i]
-      colnames(all_data)[i] <- paste0("a", substr(name, 2, nchar(name)))
-    }
-  }
+  #force empty cells to 0, and make all data numeric instead of char
+  all_data <- all_data %>%
+    rename_with(~ str_replace(., "^X", "a"), starts_with("X")) %>%
+    mutate(across(everything(), ~ {
+      x <- na_if(.x, "")      # Blanks to NA
+      x <- as.numeric(x)      # Force numeric
+      coalesce(x, 0)          # All NAs to 0
+    }))
   
   all_data <- as.data.frame(all_data)
   
@@ -68,5 +63,4 @@ get_shared_vars <- function(all_data) {
   )
   mapping <<- mapping %>% arrange(tolower(Analyte))
 }
-
 
