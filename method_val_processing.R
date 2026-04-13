@@ -38,6 +38,10 @@ slope_calcs <- function(all_data) {
   RR_summary <- native_summary / istd_summary
   RR_summary[, 1] <- native_summary[, 1] #fix the first column to contain the levels, not level / level
   
+  #need to use all points RR, not just avgs, for slope calculation:
+  RR_all <- caldata[c("Level", mapping[["Analyte"]])] / caldata[c("Level", mapping[["ISTD"]])]
+  RR_all[, 1] <- caldata[, 1] #fix the first column to contain the levels, not level / level
+  
   #set up empty matrix to hold slopes
   slopes <- matrix(nrow = 2, ncol = ncol(native_summary) - 1, dimnames = list(c("Slope", "R2"), mapping[["Analyte"]]))
   
@@ -45,8 +49,8 @@ slope_calcs <- function(all_data) {
   for (analyte in mapping[["Analyte"]]) {
     #extract current data into a tibble
     df_summary <- tibble(
-      Level = RR_summary[["Level"]],
-      RR = RR_summary[[analyte]]
+      Level = RR_all[["Level"]],
+      RR = RR_all[[analyte]]
     )
     
     #linear model regression from Alison's draft r script
@@ -165,7 +169,7 @@ LOB_calcs <- function(conc_df) {
     ) %>%
     ungroup()
   #transpose so analytes as column names
-  LOB_df <- LOB_table %>% pivot_longer(cols = c(avg, sd, LOB), names_to = "metric", values_to = "value") %>%
+  LOB_df <- LOB_table %>% pivot_longer(cols = c(avg, sd, LOB), names_to = "blanks", values_to = "value") %>%
     pivot_wider(names_from = Analyte, values_from = value)
 
   return (LOB_df)
@@ -180,14 +184,16 @@ LOD_LOQ_calcs <- function(conc_df, LOB_df, LOD_conc) {
   ) %>%
     rowwise() %>%
     mutate(
+      avg  = mean(replicate_data[[Analyte]], na.rm = TRUE),
       sd   = sd(replicate_data[[Analyte]],   na.rm = TRUE),
       LOD = LOB_df[[3, Analyte]] + (1.645 * sd),
       LOQ = pmax(LOD * 3, 0.025)
     ) %>%
     ungroup()
   #transpose so analytes are column names and metrics are rows
+  title <- paste(LOD_conc * 1000, "ng/L")
   LOD_df <- LOD_table %>% 
-    pivot_longer(cols = c(sd, LOD, LOQ), names_to = "metric", values_to = "value") %>%
+    pivot_longer(cols = c(avg, sd, LOD, LOQ), names_to = title, values_to = "value") %>%
     pivot_wider(names_from = Analyte, values_from = value)
 
   return (LOD_df)
@@ -234,15 +240,12 @@ main <- function() {
   #ASK FOR CONC TO CALCULATE LOD WITH
   LOD_conc <- NA
   while (is.na(LOD_conc)) {
-    LOD_conc <- readline(prompt = "Enter a replicate level (ng/mL or ng/L) to use for LOD/LOQ calculations: ")
+    LOD_conc <- readline(prompt = "Enter a replicate level (ng/L) to use for LOD/LOQ calculations: ")
     LOD_conc <- suppressWarnings(as.numeric(LOD_conc))
     if (is.na(LOD_conc))
       next
     
-    if (LOD_conc > 1) {
-      LOD_conc <- LOD_conc / 1000.0
-    } 
-
+    LOD_conc <- LOD_conc / 1000.0
     level_options <- unique(unlist(all_data[["Level"]]))
     if (!(LOD_conc %in% level_options)) {
       print("Error: Please enter a target/level present in the data")
@@ -260,8 +263,10 @@ main <- function() {
   #for formatting, store matrices shapes dimensions in variables
   num_analytes <- ncol(native_avg_table)
   num_levels <- nrow(native_avg_table)
-
+  
+  ##########################################################
   #### CALCULATIONS DONE, NOW WRITE DATA TO EXCEL SHEET ####
+  ##########################################################
   
   #set up global style formatting for workbook
   wb <- loadWorkbook(temp_file, na.convert = FALSE)
@@ -271,7 +276,8 @@ main <- function() {
   
   #add relevant data to temp file through openxlsx workbook
   addWorksheet(wb, "Condensed Data")
-  writeData(wb, "Condensed Data", all_data, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Condensed Data", all_data[analyte_cols], rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Condensed Data", all_data[istd_cols], rowNames = FALSE, startCol = num_analytes + 3, headerStyle = hs1)
 
   addWorksheet(wb, "Peak Areas")
   writeData(wb, "Peak Areas", native_avg_table, rowNames = TRUE, headerStyle = hs1)
@@ -316,13 +322,15 @@ main <- function() {
   
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
-  drive_update(file = cur_file, media = temp_file, name = new_name)
-
+  
+  #drive_update(file = cur_file, media = temp_file, name = new_name) #If we want auto naming
+  drive_update(file = cur_file, media = temp_file)
+  
   #delete temp file now that it has been uploaded
   unlink(temp_file)
   
   #store data in tracking sheet
-  tracking_sheet <- drive_find(pattern = "Method Validation Metric Tracking", shared_drive = "SWEL Lab")
+  #tracking_sheet <- drive_find(pattern = "Method Validation Metric Tracking", shared_drive = "SWEL Lab")
   
 }
 
