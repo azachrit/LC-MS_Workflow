@@ -1,6 +1,11 @@
-#header file for shared functions, 11/12/2025
-# Updated 1/21/2026
-# Alicia Melotik
+## ---------------------------------------------------------
+## processing_header.R 
+##
+## Purpose: clean input and create shared, global variables
+## Author: Alicia Melotik
+## Date Created: 11/12/2025
+## Date Modified: 4/20/2026
+## ---------------------------------------------------------
 
 library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/4.2.8.1
 library(googledrive) #https://googledrive.tidyverse.org/
@@ -27,40 +32,38 @@ read_into_dataframe <- function(raw_data) {
   }
   all_data[, 2] <- NULL
   
-  #force blank levels to 0, and make all levels numeric instead of char
-  all_data <- all_data %>% mutate(Level = if_else(is.na(Level), 0, if_else(Level == "", 0, as.numeric(Level)) ))
-  
-  for (i in 2:length(colnames(all_data))) {
-    #make all areas numeric too, not sure why they aren't automatically numbers
-    all_data[i] <- lapply(all_data[i], as.numeric)
-
-    #also, change the automatic X in front of analyte names to A so they are sorted correctly
-    if (startsWith(colnames(all_data)[i], "X")) {
-      name <- colnames(all_data)[i]
-      colnames(all_data)[i] <- paste0("a", substr(name, 2, nchar(name)))
-    }
-  }
+  #force empty cells to 0, and make all data numeric instead of char
+  all_data <- all_data %>%
+    rename_with(~ str_replace(., "^X", "a"), starts_with("X")) %>%
+    mutate(across(everything(), ~ {
+      x <- na_if(.x, "")      # Blanks to NA
+      x <- as.numeric(x)      # Force numeric
+      coalesce(x, 0)          # All NAs to 0
+    }))
   
   all_data <- as.data.frame(all_data)
   
   return (all_data)
 }
 
-#variables shared across most functions, make available for global use
-get_shared_vars <- function(all_data) {
-  # indices 6 to length of col names / 2 = number of analytes
+get_shared_vars <- function(all_data, sorted=TRUE) {
+  #function to generate vars shared across most functions, make available for global use
   all_col_names <<- colnames(all_data)
   
-  #order analytes and corresponding istds alphabetically analyte_cols[order(names[analyte_cols])]
-  #start at 2 in sequence to skip Level column
+  #start at 2 in sequence to skip "Level" column
+  #since analytes and istds alternate, select every other column for each list
   analyte_cols <<- all_col_names[seq(2, length(all_col_names) - 1, 2)]
   istd_cols <<- all_col_names[seq(3, length(all_col_names), 2)]
-
-  #mapping of which analytes correspond to which istds
-  names(istd_cols) <<- analyte_cols
   
-  #sort analytes alphabetically
-  analyte_cols <<- sort(analyte_cols)
+  #mapping of which analytes correspond to which istds, 
+  # since analytes are in the same order as their corresponding istd
+  mapping <<- tibble(
+    Analyte = analyte_cols,
+    ISTD = istd_cols
+  )
   
-  num_analytes <<- length(analyte_cols)
+  if (sorted) {
+    mapping <<- mapping %>% arrange(tolower(Analyte)) 
+  }
 }
+

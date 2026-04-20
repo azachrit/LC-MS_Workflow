@@ -4,11 +4,13 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 3/2/2026
+## Date Modified: 4/20/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
-source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
+#source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
+
+source("processing_header.R") ################## DELETE THIS, JUST SO NAMES NOT SORTED WHEN TESTING
 
 import_method_val <- function() {
   # If it's a true shared drive (not just shared with you), use shared_drive argument
@@ -31,6 +33,7 @@ import_method_val <- function() {
     slope_df <- slope_df[1, ]
     rownames(slope_df) <- slope_df[[1]]
     slope_df[1] <- NULL
+    slope_df[] <- lapply(slope_df, as.numeric)
   } 
   
   #get expected values for QAQC calcs
@@ -47,11 +50,10 @@ import_method_val <- function() {
   }  
   
   #get LOD, LOB, LOQ
-  # DID NOT WORRY ABT OLD FORMAT FOR THIS PART AT ALL
   name <- "LOB LOD"
   if (name %in% sheets) { 
     limits_df <- read.xlsx(temp_file, sheet = name)
-    limits_df <- limits_df[-1:-4, ] # remove additional lob data (avg, std) and just keep relevant values
+    limits_df <- limits_df[-1:-2, ] # remove additional lob data (avg, std) and just keep relevant values
     #convert to numeric
     rownames(limits_df) <- limits_df[, 1]
     limits_df <- limits_df[, -1]
@@ -136,53 +138,81 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   
   #calculate new concentrations using corrected areas ratio divided by method val slope
   corrected_RR_df <- corrected_native / corrected_ISTD
-  corrected_conc_df <- mapply('/', corrected_RR_df, slope_df)
+
+  aligned_slope <- unlist(slope_df[colnames(corrected_RR_df)])
+  corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
+  
 
   rownames(corrected_conc_df) <- rownames(all_data)
   
   return (as.data.frame(corrected_conc_df))
 }
 
-blank_subs <- function(corrected_conc_df, LOB) {
+blank_subs <- function(concentration_df, limit_df) {
   #calc 95(?)% confidence interval for maximal blank concentrations
-  if (ncol(corrected_conc_df) != length(LOB)) {
-    print("ERROR: LOB has different amount of analytes from the dataframe")
-    return
+  ### MUST USE NUMERIC CONC DF WITH NAs, NOT WITH STRING FLAGS
+  
+  if (!all(colnames(concentration_df) %in% colnames(limit_df)))
+  {
+    print("can't check df against limit")
+    return (concentration_df)
   }
-  #force NAs to 0 to not impede calculations
-  corrected_conc_df[is.na(corrected_conc_df)] <- 0
-  corrected_conc_df <- as.matrix(corrected_conc_df)
+  #make sure analytes are in same order for limit vector
+  limit_df <- limit_df[, colnames(concentration_df), drop = FALSE]
+  limit_vec <- as.numeric(limit_df[1, ])
   
-  # calculate maximal blank (first row)
-  blank_vals <- as.numeric(corrected_conc_df[1, , drop = TRUE])
-  maximal_blank <- blank_vals + (LOB * 1.895)
+  concentration_mat <- as.matrix(concentration_df)
   
-  #repeat maximal_blank rows to reshape to size of conc_df and perform subtractions
-  maximal_blank <- maximal_blank[rep(seq_len(nrow(maximal_blank)), nrow(corrected_conc_df)), ]
-  corrected_conc_df <- corrected_conc_df - maximal_blank
-  corrected_conc_df[corrected_conc_df < 0] <- 0 #floor at zero
- 
-  return (as.data.frame(corrected_conc_df))
+  blank_vals <- concentration_df[1, ]
+  
+  maximal_blank <- mapply(
+    function(blank, cur_LOB) ifelse(is.na(blank), 0, blank + (cur_LOB * 1.895)),
+    blank_vals,
+    limit_vec
+  )
+  
+  concentration_mat[is.na(concentration_mat)] <- 0
+  blank_sub_df <- sweep(concentration_mat, 2, maximal_blank, '-')
+  blank_sub_df[blank_sub_df < 0] <- 0 #floor at zero, no negatives
+  
+  return (list(as.data.frame(blank_sub_df), maximal_blank))
 }
 
-#COLUMNS MUST HAVE CONSISTENT TYPES, SO THIS COERCES ALL TO STRINGS
-check_limit <- function(concentration_df, limit_vec, default) {
-  #using LOQ for each analyte, indicate where data is below the threshold
-  concentration_df[] <- mapply(
-    function(conc, limit) ifelse(is.na(conc), default, ifelse(conc < limit, default, conc)),
-    concentration_df,
-    limit_vec,
-    SIMPLIFY = TRUE
-  )
-  return (as.data.frame(concentration_df))
+check_limit <- function(concentration_df, limit_df, default) {
+  if (!all(colnames(concentration_df) %in% colnames(limit_df)))
+  {
+    print("can't check df against limit")
+    return (concentration_df)
+  }
+  limit_df <- limit_df[, colnames(concentration_df), drop = FALSE]
+  limit_vec <- as.numeric(limit_df[1, ])
+  concentration_mat <- as.matrix(concentration_df)
+  
+  mask <- sweep(concentration_mat, 2, limit_vec, '<')
+  concentration_mat[mask] <- default
+  
+  return (as.data.frame(concentration_mat))
 }
 
 check_btwn_limits <- function(concentration_df, LOD, LOQ, default) {
   #using LOQ for each analyte, indicate where data is below the threshold
   concentration_df[] <- mapply(
-    function(conc, limit_1, limit_2) ifelse(is.na(conc), NA, ifelse(conc > limit_1 & conc < limit_2, default, conc)),
+    function(conc, limit_1, limit_2) ifelse(is.na(conc), NA, ifelse((conc > limit_1 & conc < limit_2), default, conc)),
     concentration_df,
     LOD,
+    LOQ,
+    SIMPLIFY = TRUE
+  )
+  return (as.data.frame(concentration_df))
+}
+
+
+### NOT WORKING FOR SOME REASON ###
+create_LOQ_flags <- function(concentration_df, LOQ, default) {
+  #using LOQ for each analyte, indicate where data is below the threshold
+  concentration_df[] <- mapply(
+    function(conc, limit) ifelse((conc == "<LoD" | is.na(conc)), conc, ifelse(conc < limit, default, conc)),
+    concentration_df,
     LOQ,
     SIMPLIFY = TRUE
   )
@@ -193,6 +223,7 @@ main <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
+  ####### NOTE: currently assuming slopes in method val are in same order as sorted analytes
   #get most recent method val raw data
   file_path <- drive_find(pattern = "Processed Data", shared_drive = "SWEL Lab", type="folder")
   files <- drive_ls(file_path, orderBy = "createdTime desc")
@@ -222,6 +253,9 @@ main <- function() {
   slope_df <- as.data.frame(mv_data[3])
   limits_df <- as.data.frame(mv_data[4])
   mv_name <- mv_data[[5]][["name"]]
+  LOD <- limits_df["LOD", ]
+  LOB <- limits_df["LOB", ]
+  LOQ <- limits_df["LOQ", ]
   
   #find row indices of 1 NGML samples
   indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE)
@@ -236,30 +270,37 @@ main <- function() {
   RR_df <- as.data.frame(QAQC_data[3])
   conc_df <- as.data.frame(QAQC_data[4])
   
-  #pull LOD/B/Q vector from limits df
-  LOD <- limits_df["LOD", ]
-  LOB <- limits_df["LOB", ]
-  LOQ <- limits_df["LOQ", ]
-  
   #peak areas
   corrected_conc_df <- peak_areas(all_data, native_df, ISTD_df, slope_df)
-  ### for exporting? set NAs to strings
-  #corrected_conc_df[is.na] <- "< LOD"
+  conc_w_lod <- check_limit(corrected_conc_df, LOD, "<LoD")
+  conc_w_NA <- check_limit(corrected_conc_df, LOD, NA)
   
   #perform blank subtractions x2, first time to standardize, second time to subtract blank vals
-  blank_sub_df <- blank_subs(corrected_conc_df, LOB)
-  blank_sub_df_2 <- blank_subs(blank_sub_df, LOB)
+  results <- blank_subs(conc_w_NA, LOB)
+  blank_sub_df_1 <- results[[1]]
+  maximal_1 <- t(as.data.frame(results[[2]]))
+  results <- blank_subs(blank_sub_df_1, LOB)
+  blank_sub_df_2 <- results[[1]]
+  maximal_2 <- t(as.data.frame(results[[2]]))
+  
   #set rownames to be the sample names
-  rownames(blank_sub_df) <- rownames(all_data)
+  rownames(blank_sub_df_1) <- rownames(all_data)
   rownames(blank_sub_df_2) <- rownames(all_data)
+  rownames(maximal_1)[[1]] <- "Maximal Blank 1"
+  rownames(maximal_2)[[1]] <- "Maximal Blank 2"
   #check if 2nd blank subs are below LOD?
   
   export_df <- check_limit(blank_sub_df_2, LOD, "<LoD")
   
   LOQ_flags <- check_btwn_limits(blank_sub_df_2, LOD, LOQ, "<LoQ")
+  #limits_flags <- create_LOQ_flags(export_df, LOQ, "<LoQ")
   
   
   #### CALCULATIONS DONE, NOW WRITE DATA TO EXCEL SHEET ####
+  
+  #for formatting, store matrices shapes dimensions
+  num_analytes <- ncol(all_data[analyte_cols])
+  num_levels <- nrow(all_data[analyte_cols])
   
   #set up global style formatting for workbook
   wb <- loadWorkbook(temp_file, na.convert = FALSE)
@@ -269,7 +310,8 @@ main <- function() {
   
   #add relevant data to temp file through openxlsx workbook
   addWorksheet(wb, "Condensed Data")
-  writeData(wb, "Condensed Data", all_data, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Condensed Data", all_data[analyte_cols], rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Condensed Data", all_data[istd_cols], rowNames = FALSE, startCol = num_analytes + 3, headerStyle = hs1)
   
   addWorksheet(wb, "QA QC")
   writeData(wb, "QA QC", expected_native, rowNames = FALSE, startCol = 2, headerStyle = hs1)
@@ -294,10 +336,12 @@ main <- function() {
   writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_conc_df) + 6)
   
   addWorksheet(wb, "Blank Subtractions")
-  writeData(wb, "Blank Subtractions", blank_sub_df, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", blank_sub_df_2, startRow = nrow(blank_sub_df) + 3, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", "Round 1", startCol = 1, startRow = 1)
-  writeData(wb, "Blank Subtractions", "Round 2", startCol = , startRow = nrow(blank_sub_df) + 3)
+  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", blank_sub_df_1, startRow = 4, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", maximal_2, startRow = nrow(blank_sub_df_1) + 6, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", blank_sub_df_2, startRow = nrow(blank_sub_df_1) + 9, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", "Round 1", startCol = 1, startRow = 4)
+  writeData(wb, "Blank Subtractions", "Round 2", startCol = , startRow = nrow(blank_sub_df_1) + 9)
   
   addWorksheet(wb, "Limit of Quantification")
   writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, headerStyle = hs1)
@@ -308,7 +352,7 @@ main <- function() {
     for (j in seq_len(ncol(LOQ_flags))) {
       if (LOQ_flags[i, j] == "<LoQ") {
         addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = i + 1, cols = j + 1, gridExpand = FALSE, stack = TRUE)
-        print("added style")
+        #print("added style")
       }
     }
   }
@@ -335,11 +379,11 @@ main <- function() {
   addStyle(wb, sheet = "QA QC", wrap_style, rows = 1, cols = 1, gridExpand = TRUE)
   
   #using google drive library (already imported), update file that raw data was pulled from
-  new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_analyzed.xlsx")
+  #new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_analyzed.xlsx")
   
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
-  drive_update(file = cur_file, media = temp_file, name = new_name)
+  drive_update(file = cur_file, media = temp_file)
   
   
   unlink(temp_file)
