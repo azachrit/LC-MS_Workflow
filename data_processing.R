@@ -4,21 +4,25 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 4/20/2026
+## Date Modified: 4/22/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
-#source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
+source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
 
-source("processing_header.R") ################## DELETE THIS, JUST SO NAMES NOT SORTED WHEN TESTING
+#source("processing_header.R") ################## DELETE THIS, JUST SO NAMES NOT SORTED WHEN TESTING
 
-import_method_val <- function() {
+import_method_val <- function(cur_MV_name=NULL) {
   # If it's a true shared drive (not just shared with you), use shared_drive argument
   #find most recent method val from "Processed Method Val Files" folder in Google Drive
   MV_path <- drive_find(pattern = "Processed Method Val Files", shared_drive = "SWEL Lab", type = "folder")
   files <- drive_ls(MV_path, orderBy = "createdTime desc")
-  cur_MV <- unlist(drive_ls(MV_path, orderBy = "createdTime desc")[1, "id"])
-  cur_MV_name <- files[1, "name"]
+  if (is.null(cur_MV_name)) {
+    cur_MV <- unlist(files[1, "id"])
+    cur_MV_name <- unlist(files[1, "name"])
+  } else {
+    cur_MV <- unlist(files[files[,1] == cur_MV_name, "id"])
+  }
   
   # Create a temp file path to download to
   temp_file <- tempfile(fileext = ".xlsx")
@@ -34,6 +38,7 @@ import_method_val <- function() {
     rownames(slope_df) <- slope_df[[1]]
     slope_df[1] <- NULL
     slope_df[] <- lapply(slope_df, as.numeric)
+    slope_df <- slope_df[, mapping[["Analyte"]]] #sort
   } 
   
   #get expected values for QAQC calcs
@@ -44,9 +49,12 @@ import_method_val <- function() {
     expected_native <- var_df[1, ]
     expected_native[, 1] <- NULL
     expected_native[] <- lapply(expected_native, as.numeric)
+    expected_native <- expected_native[, mapping[["Analyte"]]]
+
     expected_ISTD <- var_df[5, ]
     expected_ISTD[, 1] <- NULL
     expected_ISTD[] <- lapply(expected_ISTD, as.numeric)
+    expected_ISTD <- expected_ISTD[, mapping[["Analyte"]]]
   }  
   
   #get LOD, LOB, LOQ
@@ -58,6 +66,7 @@ import_method_val <- function() {
     rownames(limits_df) <- limits_df[, 1]
     limits_df <- limits_df[, -1]
     limits_df[] <- lapply(limits_df, as.numeric)
+    limits_df <- limits_df[, mapping[["Analyte"]]]
   }
   
   #unlink temp file to delete
@@ -138,6 +147,7 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   
   #calculate new concentrations using corrected areas ratio divided by method val slope
   corrected_RR_df <- corrected_native / corrected_ISTD
+  corrected_RR_df[corrected_RR_df == Inf] <- NA
 
   aligned_slope <- unlist(slope_df[colnames(corrected_RR_df)])
   corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
@@ -234,8 +244,9 @@ main <- function() {
     return()
   } 
   #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN THE FOLDER (could prompt for filename or date)
-  cur_file <- files[1, ]
-  file_id <- unlist(cur_file[["id"]])
+  file_name <- "Alicia Test 2026-04-20_analyzed.xlsx"
+  file_id <- unlist(files[files[,1] == file_name, "id"])
+  file_id <- unlist(files[[1, "id"]])
   
   #read data from csv at full_path
   temp_file <- tempfile(fileext = ".xlsx")
@@ -247,12 +258,13 @@ main <- function() {
   get_shared_vars(all_data)
   
   #get expected values from relevant (most recent) method val
-  mv_data <- import_method_val()
+  mv_name <- "dummy data for linear regressions"
+  mv_data <- import_method_val(mv_name)
   expected_native <- as.data.frame(mv_data[1])
   expected_ISTD <- as.data.frame(mv_data[2])
   slope_df <- as.data.frame(mv_data[3])
   limits_df <- as.data.frame(mv_data[4])
-  mv_name <- mv_data[[5]][["name"]]
+  mv_name <- mv_data[[5]]
   LOD <- limits_df["LOD", ]
   LOB <- limits_df["LOB", ]
   LOQ <- limits_df["LOQ", ]
