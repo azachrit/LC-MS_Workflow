@@ -4,7 +4,7 @@
 ## Purpose: Automate method validation processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 4/13/2026
+## Date Modified: 4/22/2026
 ## ---------------------------------------------------------
 
 # NOTE ON LINEARITY:
@@ -12,7 +12,6 @@
 ###   always linear curve with no weight
 ###   range usually (always?) 0.05-100 ng/mL or 50-100,000 ng/L
 
-####### percent differences in accuracy tab are off by a little bit???
 
 #include functions and libraries from header file
 source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
@@ -31,7 +30,7 @@ slope_calcs <- function(all_data) {
   istd_summary <- caldata %>%
     group_by(Level) %>%
     summarise(
-      across(all_of(mapping[["ISTD"]]), \(x) mean(x, na.rm = TRUE))
+      across(all_of(mapping[["ISTD"]]), ~ mean(as.numeric(.x), na.rm = TRUE))
     ) %>%
     ungroup()
 
@@ -39,8 +38,12 @@ slope_calcs <- function(all_data) {
   RR_summary[, 1] <- native_summary[, 1] #fix the first column to contain the levels, not level / level
   
   #need to use all points RR, not just avgs, for slope calculation:
-  RR_all <- caldata[c("Level", mapping[["Analyte"]])] / caldata[c("Level", mapping[["ISTD"]])]
-  RR_all[, 1] <- caldata[, 1] #fix the first column to contain the levels, not level / level
+  RR_all <- caldata[mapping[["Analyte"]]] / caldata[mapping[["ISTD"]]]
+  RR_all[RR_all == Inf] <- NA
+  
+  # Add the Level column back
+  RR_all <- cbind(caldata[, 1], RR_all)
+  colnames(RR_all)[1] <- colnames(caldata)[1]
   
   #set up empty matrix to hold slopes
   slopes <- matrix(nrow = 2, ncol = ncol(native_summary) - 1, dimnames = list(c("Slope", "R2"), mapping[["Analyte"]]))
@@ -54,7 +57,7 @@ slope_calcs <- function(all_data) {
     )
     
     #linear model regression from Alison's draft r script
-    cal_reg <- lm(RR ~ 0 + Level, data = df_summary) ## added "0 +" forces line through origin 
+    cal_reg <- lm(RR ~ 0 + Level, data = df_summary, na.action = na.omit) ## added "0 +" forces line through origin 
     
     #Plot Cal Curve data & Regression Line
     ggplot(df_summary, aes(Level, RR))+
@@ -73,8 +76,6 @@ slope_calcs <- function(all_data) {
   return (list(slopes, native_summary, istd_summary, RR_summary))
 }
 
-##variation calculations same for other workflow script (avg, std dev, RSD) 
-#(use header file again?)
 variation_calcs <- function(all_data) {
   #avg already calculated above in slope func, move to somewhere where it can be accessed here?
   replicate_data <- all_data %>% filter(Level == 1)
@@ -318,11 +319,10 @@ main <- function() {
   }
 
   #using google drive library (already imported), update file that raw data was pulled from
-  new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_Method_Val.xlsx")
-  
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
   
+  #new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_Method_Val.xlsx")
   #drive_update(file = cur_file, media = temp_file, name = new_name) #If we want auto naming
   drive_update(file = cur_file, media = temp_file)
   
