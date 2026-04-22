@@ -4,7 +4,7 @@
 ## Purpose: clean input and create shared, global variables
 ## Author: Alicia Melotik
 ## Date Created: 11/12/2025
-## Date Modified: 4/13/2026
+## Date Modified: 4/20/2026
 ## ---------------------------------------------------------
 
 library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/4.2.8.1
@@ -46,7 +46,7 @@ read_into_dataframe <- function(raw_data) {
   return (all_data)
 }
 
-get_shared_vars <- function(all_data) {
+get_shared_vars <- function(all_data, sorted=TRUE) {
   #function to generate vars shared across most functions, make available for global use
   all_col_names <<- colnames(all_data)
   
@@ -61,6 +61,9 @@ get_shared_vars <- function(all_data) {
     Analyte = analyte_cols,
     ISTD = istd_cols
   )
-  mapping <<- mapping %>% arrange(tolower(Analyte))
+  
+  if (sorted) {
+    mapping <<- mapping %>% arrange(tolower(Analyte)) 
+  }
 }
 
