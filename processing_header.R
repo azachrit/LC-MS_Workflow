@@ -85,7 +85,7 @@ read_into_dataframe <- function(raw_data) {
   
   #force empty cells to 0, and make all data numeric instead of char
   all_data <- all_data %>%
-    rename_with(~ str_replace(., "^X", "a"), starts_with("X")) %>%
+    rename_with(~ str_replace(., "^X", ""), starts_with("X")) %>%
     mutate(across(everything(), ~ {
       x <- na_if(.x, "")      # Blanks to NA
       x <- as.numeric(x)      # Force numeric
