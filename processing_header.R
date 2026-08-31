@@ -64,25 +64,20 @@ download_file <- function(folder, type) {
   # Create a temp file path to download to & download it
   temp_file <- tempfile(fileext = ".xlsx")
   drive_download(as_id(id), path = temp_file, overwrite = TRUE)
-  return (temp_file)
+  return (list(temp_file, id))
 }
 
 ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
 read_into_dataframe <- function(raw_data) {
   all_data <- raw_data
-  
-  #create column names for data frame
-  for (i in 2:6) {
-    if (!is.na(raw_data[1, i]))
-      colnames(all_data)[i] = raw_data[1, i]
-  }
+  colnames(all_data)[1:4] <- c("Name", "Data File", "Type", "Level")
 
   #remove first row of data frame (necessary ones were just set as column names)
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
   #make the row names the trial names and remove data irrelevant to calculations
   rownames(all_data) <- all_data$Name
-  #remove columns before "level" column and one after
+  #remove columns before "level" column and one after (acq date/time)
   while (colnames(all_data)[1] != "Level") {
     all_data[, 1] <- NULL
   }
@@ -90,7 +85,7 @@ read_into_dataframe <- function(raw_data) {
   
   #force empty cells to 0, and make all data numeric instead of char
   all_data <- all_data %>%
-    rename_with(~ str_replace(., "^X", "a"), starts_with("X")) %>%
+    rename_with(~ str_replace(., "^X", ""), starts_with("X")) %>%
     mutate(across(everything(), ~ {
       x <- na_if(.x, "")      # Blanks to NA
       x <- as.numeric(x)      # Force numeric
