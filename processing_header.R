@@ -70,19 +70,14 @@ download_file <- function(folder, type) {
 ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
 read_into_dataframe <- function(raw_data) {
   all_data <- raw_data
-  
-  #create column names for data frame
-  for (i in 2:6) {
-    if (!is.na(raw_data[1, i]))
-      colnames(all_data)[i] = raw_data[1, i]
-  }
+  colnames(all_data)[1:4] <- c("Name", "Data File", "Type", "Level")
 
   #remove first row of data frame (necessary ones were just set as column names)
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
   #make the row names the trial names and remove data irrelevant to calculations
   rownames(all_data) <- all_data$Name
-  #remove columns before "level" column and one after
+  #remove columns before "level" column and one after (acq date/time)
   while (colnames(all_data)[1] != "Level") {
     all_data[, 1] <- NULL
   }
