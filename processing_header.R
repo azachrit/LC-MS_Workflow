@@ -64,7 +64,7 @@ download_file <- function(folder, type) {
   # Create a temp file path to download to & download it
   temp_file <- tempfile(fileext = ".xlsx")
   drive_download(as_id(id), path = temp_file, overwrite = TRUE)
-  return (temp_file)
+  return (list(temp_file, id))
 }
 
 ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
