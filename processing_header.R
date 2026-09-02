@@ -70,8 +70,15 @@ download_file <- function(folder, type) {
 ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
 read_into_dataframe <- function(raw_data) {
   all_data <- raw_data
-  colnames(all_data)[1:4] <- c("Name", "Data File", "Type", "Level")
+  while (all_data[1, 1] == "") {
+    all_data[, 1] <- NULL
+  }
 
+  i <- 1
+  while (all_data[1, i] != "Area") {
+    colnames(all_data)[i] <- all_data[1, i]
+    i <- i + 1
+  }
   #remove first row of data frame (necessary ones were just set as column names)
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
