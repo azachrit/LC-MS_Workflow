@@ -206,7 +206,7 @@ main <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
-  file_md <- download_file("Processed Method Val Files", "method validation")
+  file_md <- download_file("LC-MS/MS", "Processed Method Val Files", "method validation")
   temp_file <- file_md[[1]]
   file_id <- file_md[[2]]
   
