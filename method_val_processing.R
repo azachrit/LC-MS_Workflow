@@ -4,7 +4,7 @@
 ## Purpose: Automate method validation processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 4/22/2026
+## Date Modified: 8/31/2026
 ## ---------------------------------------------------------
 
 # NOTE ON LINEARITY:
@@ -14,6 +14,7 @@
 
 
 #include functions and libraries from header file
+#source("processing_header.R")
 source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
 
 slope_calcs <- function(all_data) {
@@ -159,6 +160,7 @@ accuracy_calcs <- function(slopes, native_avg, ISTD_avg) {
 LOB_calcs <- function(conc_df) {
   #LoB = avg conc. + (1.645 * std dev of blank replicates)
   replicate_data <- conc_df %>% filter(Level == 0)
+  
   LOB_table <- tibble(
     Analyte = mapping[["Analyte"]]
   ) %>%
@@ -204,27 +206,15 @@ main <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
-  #get most recent method val raw data
-  file_path <- drive_find(pattern = "Processed Method Val Files", shared_drive = "SWEL Lab", type="folder")
-  files <- drive_ls(file_path, orderBy = "createdTime desc")
-
-  #check if there are any files in the folder
-  if (nrow(files) == 0) {
-    print("ERROR: Please enter your raw data into a new Excel File in the 'Processed Method Val Files' folder")
-    return()
-  } 
-  #CURRENTLY GRABBING MOST RECENTLY CREATED FILE IN METHOD VAL FOLDER
-  cur_file <- files[1, ]
-  file_id <- unlist(cur_file[["id"]])
+  file_md <- download_file("LC-MS/MS", "Processed Method Val Files", "method validation")
+  temp_file <- file_md[[1]]
+  file_id <- file_md[[2]]
   
-  #read data from csv at full_path
-  temp_file <- tempfile(fileext = ".xlsx")
-  drive_download(as_id(file_id), path = temp_file, overwrite = TRUE)
   raw_data <- readWorkbook(temp_file, sheet = 1) #raw data currently in sheet 1
   
   #perform relevant operations on data using functions
   all_data <- read_into_dataframe(raw_data)
-  get_shared_vars(all_data)
+  get_shared_vars(all_data, sorted=FALSE)
   
   result <- slope_calcs(all_data)
   slopes_df <- result[[1]]
@@ -323,8 +313,8 @@ main <- function() {
   saveWorkbook(wb, temp_file, overwrite = TRUE)
   
   #new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_Method_Val.xlsx")
-  #drive_update(file = cur_file, media = temp_file, name = new_name) #If we want auto naming
-  drive_update(file = cur_file, media = temp_file)
+  #drive_update(file = as_id(file_id), media = temp_file, name = new_name) #If we want auto naming
+  drive_update(file = as_id(file_id), media = temp_file)
   
   #delete temp file now that it has been uploaded
   unlink(temp_file)
