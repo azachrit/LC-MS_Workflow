@@ -125,15 +125,15 @@ QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df) {
   return (list(native_df, ISTD_df, RR_df, conc_df))
 }
 
-peak_areas <- function(ata, native_df, ISTD_df, slope_df) {
+peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   # need corrected RR_df and conc_df
   to_ratio <- function(x) as.numeric(x)/100
   native_ratio <- lapply(native_df[4, -1], to_ratio) #the -1 removes the first column (which says percent of expected)
   ISTD_ratio <- lapply(ISTD_df[4, -1], to_ratio)
   
   #divide each row by the native or ISTD ratio
-  corrected_native <- as.data.frame(mapply('/', ata[, mapping[["Analyte"]]], native_ratio))
-  corrected_ISTD <- as.data.frame(mapply('/', ata[, mapping[["ISTD"]]], ISTD_ratio))
+  corrected_native <- as.data.frame(mapply('/', all_data[, mapping[["Analyte"]]], native_ratio))
+  corrected_ISTD <- as.data.frame(mapply('/', all_data[, mapping[["ISTD"]]], ISTD_ratio))
   
   #calculate new concentrations using corrected areas ratio divided by method val slope
   corrected_RR_df <- corrected_native / corrected_ISTD
@@ -143,7 +143,7 @@ peak_areas <- function(ata, native_df, ISTD_df, slope_df) {
   corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
   
 
-  rownames(corrected_conc_df) <- rownames(ata)
+  rownames(corrected_conc_df) <- rownames(all_data)
   
   return (as.data.frame(corrected_conc_df))
 }
@@ -239,10 +239,10 @@ main <- function() {
   no_1ngml_data <- all_data[-indices, ]
   
   QAQC_data <- QAQC(cal_data, expected_native, expected_ISTD, slope_df)
-  native_df <- format_df(QAQC_data[1])
-  ISTD_df <- format_df(QAQC_data[2])
-  RR_df <- format_df(QAQC_data[3])
-  conc_df <- format_df(QAQC_data[4])
+  native_df <- as.data.frame(QAQC_data[1])
+  ISTD_df <- as.data.frame(QAQC_data[2])
+  RR_df <- as.data.frame(QAQC_data[3])
+  conc_df <- as.data.frame(QAQC_data[4])
   
   #peak areas
   corrected_conc_df <- peak_areas(no_1ngml_data, native_df, ISTD_df, slope_df)
