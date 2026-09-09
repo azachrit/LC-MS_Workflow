@@ -11,65 +11,65 @@ library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/
 library(googledrive) #https://googledrive.tidyverse.org/
 library(tidyverse)   #https://github.com/tidyverse/tidyverse
 
-# finds most recent file (or by name) from folder given as arg in shared Google Drive
-download_file <- function(folder, type) {
+# finds most recent file (or by name) from folders given as arg in shared Google Drive
+download_file <- function(outer_folder, inner_folder, type) {
   if (!(exists("sd_meta"))) {
     sd_meta <- shared_drive_get("SWEL Lab")
   }
   
   name <- NA
   while (is.na(name)) {
-    name <- readline(prompt = paste0("Enter the ", type, " name or press enter to use most recent one: "))
+    name <- readline(prompt = paste0("Enter the ", type, " file name or press enter to use most recent one: "))
     
     # check if name is valid/file exists
     if (name != "") {
-      if (!(endsWith(name, ".xlsx"))) {
+      if (!(endsWith(name, ".xlsx"))) { # makes it only work for excel type files (not google sheets)
         name <- paste0(name, ".xlsx")
       }
       
       file <- drive_get(path = name, shared_drive = sd_meta)
-      if (count(file) > 1) {
-        print("ERROR: Mutliple files with that name found. Please rename the file or 
-              specify which folder the file is in. For example, enter Proccessed Data/new_data.xlsx")
-        name <- NA
-      } else if (count(file) == 0) {
-        paste0("ERROR: No file called ", name, " could be found.")
-        name <- NA
-      }
       id <- unlist(file[[1, "id"]])
     }
     else {
       # get most recently created file in the proper folder
-      if (!(exists("LCMS_files"))) {
-        LCMS_files <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type = "folder") %>% filter(name == "LC-MS/MS")
+      if (!exists("LCMS_folder_id")) {
+        LCMS_folder_id <- drive_find(pattern = paste0("^", outer_folder, "$"), shared_drive = "SWEL Lab", type = "folder")$id[1]
       }
       
-      #files <- drive_ls(path = paste0("SWEL Lab/4. Instrumentation/LC-MS/MS/", folder), 
-      #                 type = ".xlsx", order_by = "createdTime desc")
+      # (Uses Drive API 'q' parameter to search directly inside LC-MS/MS)
+      subfolder <- drive_find(
+        q = sprintf("'%s' in parents and name = '%s' and mimeType = 'application/vnd.google-apps.folder'", LCMS_folder_id, inner_folder),
+        shared_drive = "SWEL Lab"
+      )
       
-      files <- drive_ls(path = as_id(LCMS_files[["id"]]), pattern = folder)
-      files <- drive_ls(path = as_id(files), orderBy = "createdTime desc")
-      
-      id <- unlist(files[[1, "id"]])
-      name <- unlist(files[1, "name"])
-      
-      #check if there are any files in the folder
-      if ((nrow(files) == 0) || (identical(id, character(0)) )) {
-        paste0("ERROR: Please enter your data into an Excel File in the ", folder, " folder (& make sure the folder exists)")
-        return()
+      # Check if subfolder exists
+      if (nrow(subfolder) == 0) {
+        stop(paste0("ERROR: Subfolder '", inner_folder, "' does not exist in LC-MS/MS."))
       }
+      
+      # Get the most recent file inside that subfolder
+      files <- drive_ls(path = as_id(subfolder$id[1]), orderBy = "createdTime desc")
+      
+      # Check if subfolder contains any files
+      if (nrow(files) == 0) {
+        stop(paste0("ERROR: Please enter your data into an Excel File in the ", inner_folder, " folder."))
+      }
+      
+      id <- files$id[1]
+      name <- files$name[1]
     }
   }
   
   # Create a temp file path to download to & download it
   temp_file <- tempfile(fileext = ".xlsx")
   drive_download(as_id(id), path = temp_file, overwrite = TRUE)
-  return (list(temp_file, id))
+  return (list(temp_file, id, name))
 }
 
 ### WARNING: ASSUMING SAME FORMAT FOR ALL RAW DATA ###
 read_into_dataframe <- function(raw_data) {
   all_data <- raw_data
+  
   while (all_data[1, 1] == "") {
     all_data[, 1] <- NULL
   }
