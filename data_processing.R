@@ -4,7 +4,7 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 8/31/2026
+## Date Modified: 9/14/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
@@ -186,6 +186,9 @@ check_limit <- function(concentration_df, limit_df, default) {
   }
   limit_df <- limit_df[, colnames(concentration_df), drop = FALSE]
   limit_vec <- as.numeric(limit_df[1, ])
+
+  concentration_df <- concentration_df %>% 
+    mutate(across(where(is.numeric), round, digits = 3))
   concentration_mat <- as.matrix(concentration_df)
   
   mask <- sweep(concentration_mat, 2, limit_vec, '<')
@@ -196,6 +199,8 @@ check_limit <- function(concentration_df, limit_df, default) {
 
 check_btwn_limits <- function(concentration_df, LOD, LOQ, default) {
   #using LOQ for each analyte, indicate where data is below the threshold
+  concentration_df <- concentration_df %>% 
+    mutate(across(where(is.numeric), round, digits = 3))
   concentration_df[] <- mapply(
     function(conc, limit_1, limit_2) ifelse(is.na(conc), NA, ifelse((conc > limit_1 & conc < limit_2), default, conc)),
     concentration_df,
@@ -234,6 +239,9 @@ main <- function() {
   
   #find row indices of 1 NGML samples
   indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE)
+  if (length(indices) == 0) {
+    indices <- grep("1 *ppb", rownames(all_data), ignore.case = TRUE)
+  }
   cal_data <- all_data[indices, ]
   #remove 1 NGML samples from data
   no_1ngml_data <- all_data[-indices, ]

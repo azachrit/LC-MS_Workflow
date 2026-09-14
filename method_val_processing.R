@@ -4,7 +4,7 @@
 ## Purpose: Automate method validation processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 8/31/2026
+## Date Modified: 9/14/2026
 ## ---------------------------------------------------------
 
 # NOTE ON LINEARITY:
@@ -160,6 +160,12 @@ accuracy_calcs <- function(slopes, native_avg, ISTD_avg) {
 LOB_calcs <- function(conc_df) {
   #LoB = avg conc. + (1.645 * std dev of blank replicates)
   replicate_data <- conc_df %>% filter(Level == 0)
+
+  #if additional blanks, just take the ones named standardly
+  if (length(replicate_data) > 7) {
+    blank_indices <- grep("blank replicate [1-7]", rownames(replicate_data), ignore.case = TRUE)
+    replicate_data <- replicate_data[blank_indices, ]
+  }
   
   LOB_table <- tibble(
     Analyte = mapping[["Analyte"]]
