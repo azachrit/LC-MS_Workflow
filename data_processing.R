@@ -170,12 +170,17 @@ blank_subs <- function(concentration_df, limit_df) {
     blank_vals,
     limit_vec
   )
+  view(maximal_blank)
   
   concentration_mat[is.na(concentration_mat)] <- 0
   blank_sub_df <- sweep(concentration_mat, 2, maximal_blank, '-')
   blank_sub_df[blank_sub_df < 0] <- 0 #floor at zero, no negatives
   
   return (list(as.data.frame(blank_sub_df), maximal_blank))
+}
+
+ISTD_recovery <- function(corrected_ISTD_peak, expected_ISTD_peak) {
+  
 }
 
 check_limit <- function(concentration_df, limit_df, default) {
