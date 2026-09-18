@@ -1,7 +1,7 @@
 # LC-MS
 R scripts to automate the "pipeline" of LC-MS data processing. <br>
 Excel sheet folders where data should be uploaded are located in the [SWEL Lab Google Drive](https://drive.google.com/drive/u/0/folders/1Wo-_9w0MelpFjG8tsKr8pQDiBCjwmqy3). <br><br>
-  *If you start getting errors, try to redownload the script and run it again. I may have made changes to the header file pulled from this Github.*
+  *If you start getting errors, try to redownload the script and run it again. I may have made changes to the file(s) pulled from this Github.*
 
  ### Dependencies
   Run the following lines of code to install the necessary libraries before running a script for the first time:
