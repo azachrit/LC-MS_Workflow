@@ -4,7 +4,7 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 9/14/2026
+## Date Modified: 9/23/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
@@ -117,7 +117,7 @@ QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df) {
     ungroup() %>%
     select(-ISTD)  %>% 
     pivot_longer(cols = c(Average, Percent_Difference, Accuracy), names_to = "Measured Conc (ng/ml)", values_to = "value") %>%
-    pivot_wider(names_from = Analyte, values_from = value)
+    pivot_wider(names_from = Analyte, values_from = value) 
 
   #combine the calculated conc df with other metrics df
   conc_df <- rbind(conc_df, conc_metrics)
@@ -142,10 +142,10 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   aligned_slope <- unlist(slope_df[colnames(corrected_RR_df)])
   corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
   
-
   rownames(corrected_conc_df) <- rownames(all_data)
+  rownames(corrected_ISTD) <- rownames(all_data)
   
-  return (as.data.frame(corrected_conc_df))
+  return (list(corrected_conc_df, corrected_ISTD))
 }
 
 blank_subs <- function(concentration_df, limit_df) {
@@ -170,7 +170,7 @@ blank_subs <- function(concentration_df, limit_df) {
     blank_vals,
     limit_vec
   )
-  view(maximal_blank)
+  #view(maximal_blank)
   
   concentration_mat[is.na(concentration_mat)] <- 0
   blank_sub_df <- sweep(concentration_mat, 2, maximal_blank, '-')
@@ -179,8 +179,25 @@ blank_subs <- function(concentration_df, limit_df) {
   return (list(as.data.frame(blank_sub_df), maximal_blank))
 }
 
-ISTD_recovery <- function(corrected_ISTD_peak, expected_ISTD_peak) {
+ISTD_recovery <- function(corrected_ISTD, expected_ISTD) {
+  percent_recovery <- sweep(corrected_ISTD, 2, unlist(expected_ISTD), '/') * 100
+  colnames(percent_recovery) <- mapping[["Analyte"]]
   
+  metrics_df <-  mapping %>%
+    rowwise() %>%
+    mutate(
+      Min = min(percent_recovery[[Analyte]], na.rm = TRUE),
+      Max = max(percent_recovery[[Analyte]], na.rm = TRUE),
+      Median = median(percent_recovery[[Analyte]], na.rm = TRUE),
+      Average = mean(percent_recovery[[Analyte]], na.rm = TRUE),
+      Std_Dev = sd(percent_recovery[[Analyte]], na.rm = TRUE)
+    ) %>%
+    ungroup()  %>% select(-ISTD) %>% 
+    pivot_longer(cols = c(Min, Max, Median, Average, Std_Dev), names_to = "Metric", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value) %>%
+    column_to_rownames("Metric")
+  
+  return (list(percent_recovery, metrics_df))
 }
 
 check_limit <- function(concentration_df, limit_df, default) {
@@ -250,17 +267,26 @@ main <- function() {
   cal_data <- all_data[indices, ]
   #remove 1 NGML samples from data
   no_1ngml_data <- all_data[-indices, ]
-  
+
+  #perform quality control/quality assurance
   QAQC_data <- QAQC(cal_data, expected_native, expected_ISTD, slope_df)
   native_df <- as.data.frame(QAQC_data[1])
   ISTD_df <- as.data.frame(QAQC_data[2])
   RR_df <- as.data.frame(QAQC_data[3])
   conc_df <- as.data.frame(QAQC_data[4])
   
-  #peak areas
-  corrected_conc_df <- peak_areas(no_1ngml_data, native_df, ISTD_df, slope_df)
+  #info for peak areas tab
+  corrected_dfs <- peak_areas(no_1ngml_data, native_df, ISTD_df, slope_df)
+  corrected_conc_df <- as.data.frame(corrected_dfs[1])
+  corrected_ISTD_df <- as.data.frame(corrected_dfs[2])  %>%
+    rename_with(~ str_replace(., "^X", ""), starts_with("X"))
   conc_w_lod <- check_limit(corrected_conc_df, LOD, "<LoD")
   conc_w_NA <- check_limit(corrected_conc_df, LOD, NA)
+  
+  #ISTD Recovery
+  ISTD_recovery_dfs <- ISTD_recovery(corrected_ISTD_df, expected_ISTD)
+  percent_recovery <- as.data.frame(ISTD_recovery_dfs[1])
+  recovery_metrics <- as.data.frame(ISTD_recovery_dfs[2])
   
   #perform blank subtractions x2, first time to standardize, second time to subtract blank vals
   results <- blank_subs(conc_w_NA, LOB)
@@ -333,6 +359,12 @@ main <- function() {
   addWorksheet(wb, "Limit of Quantification")
   writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, headerStyle = hs1)
   writeData(wb, "Limit of Quantification", "Concentration (ng/mL)", startCol = 1, startRow = 1)
+  
+  addWorksheet(wb, "ISTD Recovery")
+  writeData(wb, "ISTD Recovery", percent_recovery, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "ISTD Recovery", "ISTD % Recovery", startCol = 1, startRow = 1)
+  writeData(wb, "ISTD Recovery", recovery_metrics, rowNames = TRUE, startRow = nrow(percent_recovery) + 3, headerStyle = hs1)
+  writeData(wb, "ISTD Recovery", "Recovery Metrics", startCol = 1, startRow = nrow(percent_recovery) + 3)
   
   LOQ_style <- createStyle(fgFill = "#fabf8f") 
   LOD_style <- createStyle(fgFill = "#afffaf")
