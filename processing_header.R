@@ -70,7 +70,7 @@ download_file <- function(outer_folder, inner_folder, type) {
 read_into_dataframe <- function(raw_data) {
   all_data <- raw_data
   
-  while (all_data[1, 1] == "") {
+  while ((is.na(all_data[1, 1])) || (all_data[1, 1] == "")) {
     all_data[, 1] <- NULL
   }
 
