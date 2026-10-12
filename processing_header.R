@@ -83,7 +83,7 @@ read_into_dataframe <- function(raw_data) {
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
   #make the row names the trial names and remove data irrelevant to calculations
-  rownames(all_data) <- all_data$Name
+  rownames(all_data) <- make.names(all_data$Name, unique = TRUE)
   #remove columns before "level" column and one after (acq date/time)
   while (colnames(all_data)[1] != "Level") {
     all_data[, 1] <- NULL

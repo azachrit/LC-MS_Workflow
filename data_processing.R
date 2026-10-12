@@ -44,7 +44,7 @@ import_method_val <- function() {
   name <- "LOB LOD"
   if (name %in% sheets) { 
     limits_df <- read.xlsx(temp_file, sheet = name)
-    limits_df <- limits_df[-1:-2, ] # remove additional lob data (avg, std) and just keep relevant values
+    limits_df <- limits_df[c(3, 7, 8), ] # remove additional data and just keep relevant values
     #convert to numeric
     rownames(limits_df) <- limits_df[, 1]
     limits_df <- limits_df[, -1]
@@ -150,7 +150,7 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   corrected_RR_df <- corrected_native / corrected_ISTD
   corrected_RR_df[corrected_RR_df == Inf] <- NA
 
-  aligned_slope <- unlist(slope_df[colnames(corrected_RR_df)])
+  aligned_slope <- unlist(slope_df[mapping[["Analyte"]]])
   corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
   
   rownames(corrected_conc_df) <- rownames(all_data)
@@ -194,14 +194,17 @@ ISTD_recovery <- function(corrected_ISTD, expected_ISTD) {
   percent_recovery <- sweep(corrected_ISTD, 2, unlist(expected_ISTD), '/') * 100
   colnames(percent_recovery) <- mapping[["Analyte"]]
   
+  #exclude blank in metrics
+  no_blank_pr <- percent_recovery[-grep("blank", rownames(percent_recovery), ignore.case = TRUE), ]
+
   metrics_df <-  mapping %>%
     rowwise() %>%
     mutate(
-      Min = min(percent_recovery[[Analyte]], na.rm = TRUE),
-      Max = max(percent_recovery[[Analyte]], na.rm = TRUE),
-      Median = median(percent_recovery[[Analyte]], na.rm = TRUE),
-      Average = mean(percent_recovery[[Analyte]], na.rm = TRUE),
-      Std_Dev = sd(percent_recovery[[Analyte]], na.rm = TRUE)
+      Min = min(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Max = max(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Median = median(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Average = mean(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Std_Dev = sd(no_blank_pr[[Analyte]], na.rm = TRUE)
     ) %>%
     ungroup()  %>% select(-ISTD) %>% 
     pivot_longer(cols = c(Min, Max, Median, Average, Std_Dev), names_to = "Metric", values_to = "value") %>%
@@ -271,7 +274,7 @@ main <- function() {
   LOQ <- limits_df["LOQ", ]
   
   #find row indices of 1 NGML samples
-  indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE)
+  indices <- grep("1 *.*NGML", rownames(all_data), ignore.case = TRUE)
   if (length(indices) == 0) {
     indices <- grep("1 *ppb", rownames(all_data), ignore.case = TRUE)
   }
@@ -340,9 +343,12 @@ main <- function() {
   
   #add table names for clarity at top left of each table
   writeData(wb, "QA QC", paste0("Method val data from: ", mv_name), startCol = 1, startRow = 1)
-  writeData(wb, "QA QC", "Expected Native", startRow = 2, startCol = 1)
+  writeData(wb, "QA QC", "Expected Native", startRow = 2)
   writeData(wb, "QA QC", "Expected ISTD", startRow = 3)
+  writeData(wb, "QA QC", "Native Peak Areas", startRow = 5)
+  writeData(wb, "QA QC", "ISTD Peak Areas", startRow = nrow(native_df) + 7)
   writeData(wb, "QA QC", "Relative Response", startRow = nrow(native_df) + nrow(ISTD_df) + 9)
+  writeData(wb, "QA QC", "Measured Conc. (ng/mL)", startRow = nrow(native_df) + nrow(ISTD_df) + nrow(RR_df) + 11)
   
   addWorksheet(wb, "Peak Areas")
   writeData(wb, "Peak Areas", slope_df, rowNames = TRUE, startCol = 1, startRow = 1, headerStyle = hs1)
@@ -354,13 +360,12 @@ main <- function() {
   writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_conc_df) + 9)
   
   addWorksheet(wb, "Blank Subtractions")
-  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", blank_sub_df_1, startRow = 4, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", "Blank subtracted Conc. (ng/mL)", startCol = 1, startRow = 4)
+  writeData(wb, "Blank Subtractions", LOB, rowNames = TRUE, startRow = 3)
+  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, colNames = FALSE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", blank_sub_df_1, startRow = 5, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", "Blank subtracted Conc. (ng/mL)", startCol = 1, startRow = 5)
 
   addWorksheet(wb, "Limit of Quantification")
-  writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Limit of Quantification", "Concentration (ng/mL)", startCol = 1, startRow = 1)
   
   addWorksheet(wb, "ISTD Recovery")
   writeData(wb, "ISTD Recovery", percent_recovery, rowNames = TRUE, headerStyle = hs1)
@@ -370,13 +375,19 @@ main <- function() {
   
   LOQ_style <- createStyle(fgFill = "#fabf8f") 
   LOD_style <- createStyle(fgFill = "#afffaf")
+  writeData(wb, "Limit of Quantification", LOQ, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Limit of Quantification", LOD, rowNames = TRUE, colNames = FALSE, startRow = 3)
+  addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = 2, cols = seq(1, num_analytes + 1))
+  addStyle(wb, "Limit of Quantification", style = LOD_style, rows = 3, cols = seq(1, num_analytes + 1))
+  writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, startRow = 5, headerStyle = hs1)
+  writeData(wb, "Limit of Quantification", "Concentration (ng/mL)", startCol = 1, startRow = 5)
+  
   for (i in seq_len(nrow(LOQ_flags))) {
     for (j in seq_len(ncol(LOQ_flags))) {
       if (LOQ_flags[i, j] == "<LoQ") {
-        addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = i + 1, cols = j + 1, gridExpand = FALSE, stack = TRUE)
-        #print("added style")
+        addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = i + 5, cols = j + 1, gridExpand = FALSE, stack = TRUE)
       } else if (export_df[i,j] == "<LoD") {
-        addStyle(wb, "Limit of Quantification", style = LOD_style, rows = i + 1, cols = j + 1, gridExpand = FALSE, stack = TRUE)
+        addStyle(wb, "Limit of Quantification", style = LOD_style, rows = i + 5, cols = j + 1, gridExpand = FALSE, stack = TRUE)
       }
     }
   }

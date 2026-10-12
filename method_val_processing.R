@@ -1,7 +1,8 @@
 ## ---------------------------------------------------------
 ## method_val_processing.R 
 ##
-## Purpose: Automate method validation processing
+## Purpose: Automate method validation input, 
+##              calculations, formatting, and output
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
 ## Date Modified: 9/14/2026
