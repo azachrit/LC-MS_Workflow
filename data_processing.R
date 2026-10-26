@@ -154,9 +154,10 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
   
   rownames(corrected_conc_df) <- rownames(all_data)
+  rownames(corrected_native) <- rownames(all_data)
   rownames(corrected_ISTD) <- rownames(all_data)
   
-  return (list(corrected_conc_df, corrected_ISTD))
+  return (list(corrected_conc_df, corrected_native, corrected_ISTD))
 }
 
 blank_subs <- function(concentration_df, limit_df) {
@@ -170,11 +171,12 @@ blank_subs <- function(concentration_df, limit_df) {
   }
   #make sure analytes are in same order for limit vector
   limit_df <- limit_df[, colnames(concentration_df), drop = FALSE]
-  limit_vec <- as.numeric(limit_df[1, ])
+  #limit_vec <- as.numeric(limit_df[grep("blank", rownames(concentration_df), ignore.case = TRUE), ])
+  limit_vec <- as.numeric(limit_df[])
   
   concentration_mat <- as.matrix(concentration_df)
   
-  blank_vals <- concentration_df[1, ]
+  blank_vals <- concentration_df[grep("blank", rownames(concentration_df), ignore.case = TRUE), ]
   
   maximal_blank <- mapply(
     function(blank, cur_LOB) ifelse(is.na(blank), 0, blank + (cur_LOB * 1.895)),
@@ -277,6 +279,9 @@ main <- function() {
   indices <- grep("1 *.*NGML", rownames(all_data), ignore.case = TRUE)
   if (length(indices) == 0) {
     indices <- grep("1 *ppb", rownames(all_data), ignore.case = TRUE)
+  } 
+  if (length(indices) > 3) {
+   indices <- indices[0:3] 
   }
   cal_data <- all_data[indices, ]
   #remove 1 NGML samples from data
@@ -292,7 +297,8 @@ main <- function() {
   #info for peak areas tab
   corrected_dfs <- peak_areas(no_1ngml_data, native_df, ISTD_df, slope_df)
   corrected_conc_df <- format_df(corrected_dfs[1])
-  corrected_ISTD_df <- as.data.frame(corrected_dfs[2])
+  corrected_native_df <- as.data.frame(corrected_dfs[2])
+  corrected_ISTD_df <- as.data.frame(corrected_dfs[3])
   conc_w_lod <- check_limit(corrected_conc_df, LOD, "<LoD")
   conc_w_NA <- check_limit(corrected_conc_df, LOD, NA)
   
@@ -351,19 +357,24 @@ main <- function() {
   writeData(wb, "QA QC", "Measured Conc. (ng/mL)", startRow = nrow(native_df) + nrow(ISTD_df) + nrow(RR_df) + 11)
   
   addWorksheet(wb, "Peak Areas")
-  writeData(wb, "Peak Areas", slope_df, rowNames = TRUE, startCol = 1, startRow = 1, headerStyle = hs1)
-  writeData(wb, "Peak Areas", corrected_conc_df, rowNames = TRUE, startRow = 4, headerStyle = hs1)
-  writeData(wb, "Peak Areas", "Concentration (ng/mL)", startCol = 1, startRow = 4)
+  writeData(wb, "Peak Areas", corrected_native_df, rowNames = TRUE, startRow = 1, headerStyle = hs1)
+  writeData(wb, "Peak Areas", corrected_ISTD_df, rowNames = TRUE, startRow = nrow(corrected_native_df) + 3, headerStyle = hs1)
+  writeData(wb, "Peak Areas", slope_df, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + 5, headerStyle = hs1)
+  writeData(wb, "Peak Areas", corrected_conc_df, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(slope_df) + 7, headerStyle = hs1)
+  writeData(wb, "Peak Areas", "Corrected Native", startRow = 1)
+  writeData(wb, "Peak Areas", "Corrected ISTD", startRow = nrow(corrected_native_df) + 3)
+  writeData(wb, "Peak Areas", "Corrected Concentration (ng/mL)", startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(slope_df) + 7, headerStyle = hs1)
+  
   # check against lod and reprint to file
-  writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_conc_df) + 6, headerStyle = hs1)
-  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_conc_df) + 9, headerStyle = hs1)
-  writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_conc_df) + 9)
+  writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 15, headerStyle = hs1)
+  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 17, headerStyle = hs1)
+  writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 17)
   
   addWorksheet(wb, "Blank Subtractions")
-  writeData(wb, "Blank Subtractions", LOB, rowNames = TRUE, startRow = 3)
-  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, colNames = FALSE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", LOB, rowNames = TRUE, colNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, colNames = FALSE, startRow = 3)
   writeData(wb, "Blank Subtractions", blank_sub_df_1, startRow = 5, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", "Blank subtracted Conc. (ng/mL)", startCol = 1, startRow = 5)
+  writeData(wb, "Blank Subtractions", "Blank Subtracted Conc. (ng/mL)", startCol = 1, startRow = 5)
 
   addWorksheet(wb, "Limit of Quantification")
   
