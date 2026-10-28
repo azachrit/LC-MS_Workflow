@@ -366,9 +366,9 @@ main <- function() {
   writeData(wb, "Peak Areas", "Corrected Concentration (ng/mL)", startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(slope_df) + 7, headerStyle = hs1)
   
   # check against lod and reprint to file
-  writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 15, headerStyle = hs1)
-  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 17, headerStyle = hs1)
-  writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 17)
+  writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 9, headerStyle = hs1)
+  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 12, headerStyle = hs1)
+  writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 12)
   
   addWorksheet(wb, "Blank Subtractions")
   writeData(wb, "Blank Subtractions", LOB, rowNames = TRUE, colNames = TRUE, headerStyle = hs1)
