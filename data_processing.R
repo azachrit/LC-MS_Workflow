@@ -4,7 +4,7 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 8/31/2026
+## Date Modified: 10/28/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
@@ -26,8 +26,6 @@ import_method_val <- function() {
     slope_df <- slope_df[1, ]
     rownames(slope_df) <- slope_df[[1]]
     slope_df[1] <- NULL
-    slope_df[] <- lapply(slope_df, as.numeric)
-    slope_df <- slope_df[, mapping[["Analyte"]]] #sort
   } 
   
   #get expected values for QAQC calcs
@@ -46,7 +44,7 @@ import_method_val <- function() {
   name <- "LOB LOD"
   if (name %in% sheets) { 
     limits_df <- read.xlsx(temp_file, sheet = name)
-    limits_df <- limits_df[-1:-2, ] # remove additional lob data (avg, std) and just keep relevant values
+    limits_df <- limits_df[c(3, 7, 8), ] # remove additional data and just keep relevant values
     #convert to numeric
     rownames(limits_df) <- limits_df[, 1]
     limits_df <- limits_df[, -1]
@@ -61,24 +59,33 @@ import_method_val <- function() {
 format_df <- function(df) {
   df <- as.data.frame(df) %>% mutate(across(everything(), as.numeric)) %>%
     rename_with(~ str_replace(., "^X", ""), starts_with("X"))
+  
   df <- df[, mapping[["Analyte"]]]
   return (df)
 }
 
 QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df) {
+  # 1. Native Peak Area Metrics
   native_df <- mapping %>%
     rowwise() %>%
     mutate(
-      Average = mean(cal_data[[Analyte]], na.rm = TRUE), #(na.rm means remove NA values if any present)
+      Average = mean(cal_data[[Analyte]], na.rm = TRUE),
       Std_Dev = sd(cal_data[[Analyte]], na.rm = TRUE),
       RSD = (Std_Dev / Average) * 100,
       Percent_of_Expected = (Average / as.numeric(expected_native[[Analyte]])) * 100
     ) %>%
     ungroup() %>%
-    select(-ISTD)
+    select(-ISTD) %>% 
+    pivot_longer(
+      cols = c(Average, Std_Dev, RSD, Percent_of_Expected), 
+      names_to = "Metric", 
+      values_to = "value"
+    ) %>%
+    pivot_wider(names_from = Analyte, values_from = value) %>% 
+    column_to_rownames(var = "Metric")
   
-  #repeat with ISTDs
-  ISTD_df <-  mapping %>%
+  # 2. ISTD Peak Area Metrics
+  ISTD_df <- mapping %>%
     rowwise() %>%
     mutate(
       Average = mean(cal_data[[ISTD]], na.rm = TRUE),
@@ -87,49 +94,53 @@ QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df) {
       Percent_of_Expected = (Average / as.numeric(expected_ISTD[[Analyte]])) * 100
     ) %>%
     ungroup() %>%
-    select(-ISTD)
+    select(-ISTD) %>% 
+    pivot_longer(
+      cols = c(Average, Std_Dev, RSD, Percent_of_Expected), 
+      names_to = "Metric", 
+      values_to = "value"
+    ) %>%
+    pivot_wider(names_from = Analyte, values_from = value) %>% 
+    column_to_rownames(var = "Metric")
   
-  #format tables to have analytes lengthwise
-  native_df <- native_df %>% 
-    pivot_longer(cols = c(Average, Std_Dev, RSD, Percent_of_Expected), names_to = "Native Peak Areas", values_to = "value") %>%
-    pivot_wider(names_from = Analyte, values_from = value)
-  
-  ISTD_df <- ISTD_df %>% 
-    pivot_longer(cols = c(Average, Std_Dev, RSD, Percent_of_Expected), names_to = "ISTD Peak Areas", values_to = "value") %>%
-    pivot_wider(names_from = Analyte, values_from = value)
-  
-  #calculate RR for each run
+  # 3. Response Ratio (RR) Summary Metrics
   RR_df <- cal_data[, mapping[["Analyte"]]] / cal_data[, mapping[["ISTD"]]]
-
-  #calculate concentration for each run using conc = RR/slope
-  conc_df <- as.data.frame(mapply('/', RR_df, slope_df))
-  conc_df <- cbind(rownames(RR_df), conc_df)
-  colnames(conc_df)[1] <- "Measured Conc (ng/ml)"
   
-  #df for other included concentration metrics
-  conc_metrics <-  mapping %>%
+  # 4. Concentration Metrics (ng/ml)
+  # Calculate per-run concentration matrix
+  conc_raw <- as.data.frame(mapply('/', RR_df, slope_df))
+  
+  conc_metrics <- mapping %>%
     rowwise() %>%
     mutate(
-      Average = mean(conc_df[[Analyte]], na.rm = TRUE),
+      Average = mean(conc_raw[[Analyte]], na.rm = TRUE),
       Percent_Difference = (1 - Average) / ((Average + 1) / 2) * 100,
-      Accuracy = Average/1 * 100
+      Accuracy = (Average / 1) * 100
     ) %>%
     ungroup() %>%
-    select(-ISTD)  %>% 
-    pivot_longer(cols = c(Average, Percent_Difference, Accuracy), names_to = "Measured Conc (ng/ml)", values_to = "value") %>%
+    select(-ISTD) %>% 
+    pivot_longer(
+      cols = c(Average, Percent_Difference, Accuracy), 
+      names_to = "Metric", 
+      values_to = "value"
+    ) %>%
     pivot_wider(names_from = Analyte, values_from = value)
-
-  #combine the calculated conc df with other metrics df
-  conc_df <- rbind(conc_df, conc_metrics)
   
+  # Bind run-by-run concentrations with summarized metrics
+  conc_df <- bind_rows(
+    conc_raw %>% rownames_to_column(var = "Metric"),
+    conc_metrics
+  ) %>% 
+    column_to_rownames(var = "Metric")
+
   return (list(native_df, ISTD_df, RR_df, conc_df))
 }
 
 peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   # need corrected RR_df and conc_df
   to_ratio <- function(x) as.numeric(x)/100
-  native_ratio <- lapply(native_df[4, -1], to_ratio) #the -1 removes the first column (which says percent of expected)
-  ISTD_ratio <- lapply(ISTD_df[4, -1], to_ratio)
+  native_ratio <- lapply(native_df[4,], to_ratio) 
+  ISTD_ratio <- lapply(ISTD_df[4,], to_ratio)
   
   #divide each row by the native or ISTD ratio
   corrected_native <- as.data.frame(mapply('/', all_data[, mapping[["Analyte"]]], native_ratio))
@@ -139,13 +150,14 @@ peak_areas <- function(all_data, native_df, ISTD_df, slope_df) {
   corrected_RR_df <- corrected_native / corrected_ISTD
   corrected_RR_df[corrected_RR_df == Inf] <- NA
 
-  aligned_slope <- unlist(slope_df[colnames(corrected_RR_df)])
+  aligned_slope <- unlist(slope_df[mapping[["Analyte"]]])
   corrected_conc_df <- mapply('/', corrected_RR_df, aligned_slope)
   
-
   rownames(corrected_conc_df) <- rownames(all_data)
+  rownames(corrected_native) <- rownames(all_data)
+  rownames(corrected_ISTD) <- rownames(all_data)
   
-  return (as.data.frame(corrected_conc_df))
+  return (list(corrected_conc_df, corrected_native, corrected_ISTD))
 }
 
 blank_subs <- function(concentration_df, limit_df) {
@@ -159,23 +171,49 @@ blank_subs <- function(concentration_df, limit_df) {
   }
   #make sure analytes are in same order for limit vector
   limit_df <- limit_df[, colnames(concentration_df), drop = FALSE]
-  limit_vec <- as.numeric(limit_df[1, ])
+  #limit_vec <- as.numeric(limit_df[grep("blank", rownames(concentration_df), ignore.case = TRUE), ])
+  limit_vec <- as.numeric(limit_df[])
   
   concentration_mat <- as.matrix(concentration_df)
   
-  blank_vals <- concentration_df[1, ]
+  blank_vals <- concentration_df[grep("blank", rownames(concentration_df), ignore.case = TRUE), ]
   
   maximal_blank <- mapply(
     function(blank, cur_LOB) ifelse(is.na(blank), 0, blank + (cur_LOB * 1.895)),
     blank_vals,
     limit_vec
   )
+  #view(maximal_blank)
   
   concentration_mat[is.na(concentration_mat)] <- 0
   blank_sub_df <- sweep(concentration_mat, 2, maximal_blank, '-')
   blank_sub_df[blank_sub_df < 0] <- 0 #floor at zero, no negatives
   
   return (list(as.data.frame(blank_sub_df), maximal_blank))
+}
+
+ISTD_recovery <- function(corrected_ISTD, expected_ISTD) {
+  percent_recovery <- sweep(corrected_ISTD, 2, unlist(expected_ISTD), '/') * 100
+  colnames(percent_recovery) <- mapping[["Analyte"]]
+  
+  #exclude blank in metrics
+  no_blank_pr <- percent_recovery[-grep("blank", rownames(percent_recovery), ignore.case = TRUE), ]
+
+  metrics_df <-  mapping %>%
+    rowwise() %>%
+    mutate(
+      Min = min(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Max = max(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Median = median(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Average = mean(no_blank_pr[[Analyte]], na.rm = TRUE),
+      Std_Dev = sd(no_blank_pr[[Analyte]], na.rm = TRUE)
+    ) %>%
+    ungroup()  %>% select(-ISTD) %>% 
+    pivot_longer(cols = c(Min, Max, Median, Average, Std_Dev), names_to = "Metric", values_to = "value") %>%
+    pivot_wider(names_from = Analyte, values_from = value) %>%
+    column_to_rownames("Metric")
+  
+  return (list(percent_recovery, metrics_df))
 }
 
 check_limit <- function(concentration_df, limit_df, default) {
@@ -186,6 +224,9 @@ check_limit <- function(concentration_df, limit_df, default) {
   }
   limit_df <- limit_df[, colnames(concentration_df), drop = FALSE]
   limit_vec <- as.numeric(limit_df[1, ])
+
+  concentration_df <- concentration_df %>% 
+    mutate(across(where(is.numeric), round, digits = 3))
   concentration_mat <- as.matrix(concentration_df)
   
   mask <- sweep(concentration_mat, 2, limit_vec, '<')
@@ -196,6 +237,8 @@ check_limit <- function(concentration_df, limit_df, default) {
 
 check_btwn_limits <- function(concentration_df, LOD, LOQ, default) {
   #using LOQ for each analyte, indicate where data is below the threshold
+  concentration_df <- concentration_df %>% 
+    mutate(across(where(is.numeric), round, digits = 3))
   concentration_df[] <- mapply(
     function(conc, limit_1, limit_2) ifelse(is.na(conc), NA, ifelse((conc > limit_1 & conc < limit_2), default, conc)),
     concentration_df,
@@ -233,40 +276,49 @@ main <- function() {
   LOQ <- limits_df["LOQ", ]
   
   #find row indices of 1 NGML samples
-  indices <- grep("1 *NGML", rownames(all_data), ignore.case = TRUE)
+  indices <- grep("1 *.*NGML", rownames(all_data), ignore.case = TRUE)
+  if (length(indices) == 0) {
+    indices <- grep("1 *ppb", rownames(all_data), ignore.case = TRUE)
+  } 
+  if (length(indices) > 3) {
+   indices <- indices[0:3] 
+  }
   cal_data <- all_data[indices, ]
   #remove 1 NGML samples from data
   no_1ngml_data <- all_data[-indices, ]
-  
+
+  #perform quality control/quality assurance
   QAQC_data <- QAQC(cal_data, expected_native, expected_ISTD, slope_df)
-  native_df <- as.data.frame(QAQC_data[1])
-  ISTD_df <- as.data.frame(QAQC_data[2])
-  RR_df <- as.data.frame(QAQC_data[3])
-  conc_df <- as.data.frame(QAQC_data[4])
+  native_df <- QAQC_data[[1]]
+  ISTD_df <- format_df(QAQC_data[2])
+  RR_df <- format_df(QAQC_data[3])
+  conc_df <- format_df(QAQC_data[4])
   
-  #peak areas
-  corrected_conc_df <- peak_areas(no_1ngml_data, native_df, ISTD_df, slope_df)
+  #info for peak areas tab
+  corrected_dfs <- peak_areas(no_1ngml_data, native_df, ISTD_df, slope_df)
+  corrected_conc_df <- format_df(corrected_dfs[1])
+  corrected_native_df <- as.data.frame(corrected_dfs[2])
+  corrected_ISTD_df <- as.data.frame(corrected_dfs[3])
   conc_w_lod <- check_limit(corrected_conc_df, LOD, "<LoD")
   conc_w_NA <- check_limit(corrected_conc_df, LOD, NA)
+  
+  #ISTD Recovery
+  ISTD_recovery_dfs <- ISTD_recovery(corrected_ISTD_df, expected_ISTD)
+  percent_recovery <- format_df(ISTD_recovery_dfs[1])
+  recovery_metrics <- format_df(ISTD_recovery_dfs[2])
   
   #perform blank subtractions x2, first time to standardize, second time to subtract blank vals
   results <- blank_subs(conc_w_NA, LOB)
   blank_sub_df_1 <- results[[1]]
   maximal_1 <- t(as.data.frame(results[[2]]))
-  results <- blank_subs(blank_sub_df_1, LOB)
-  blank_sub_df_2 <- results[[1]]
-  maximal_2 <- t(as.data.frame(results[[2]]))
   
   #set rownames to be the sample names
   rownames(blank_sub_df_1) <- rownames(no_1ngml_data)
-  rownames(blank_sub_df_2) <- rownames(no_1ngml_data)
   rownames(maximal_1)[[1]] <- "Maximal Blank 1"
-  rownames(maximal_2)[[1]] <- "Maximal Blank 2"
-  #check if 2nd blank subs are below LOD?
   
-  export_df <- check_limit(blank_sub_df_2, LOD, "<LoD")
+  export_df <- check_limit(blank_sub_df_1, LOD, "<LoD")
   
-  LOQ_flags <- check_btwn_limits(blank_sub_df_2, LOD, LOQ, "<LoQ")
+  LOQ_flags <- check_btwn_limits(blank_sub_df_1, LOD, LOQ, "<LoQ")
   
   ##########################################################
   #### CALCULATIONS DONE, NOW WRITE DATA TO EXCEL SHEET ####
@@ -290,46 +342,63 @@ main <- function() {
   addWorksheet(wb, "QA QC")
   writeData(wb, "QA QC", expected_native, rowNames = FALSE, startCol = 2, headerStyle = hs1)
   writeData(wb, "QA QC", expected_ISTD, rowNames = FALSE, colNames = FALSE, startRow = 3, startCol = 2)
-  writeData(wb, "QA QC", native_df, rowNames = FALSE, startRow = 5, headerStyle = hs1)
-  writeData(wb, "QA QC", ISTD_df, rowNames = FALSE, startRow = nrow(native_df) + 7, headerStyle = hs1)
+  writeData(wb, "QA QC", native_df, rowNames = TRUE, startRow = 5, headerStyle = hs1)
+  writeData(wb, "QA QC", ISTD_df, rowNames = TRUE, startRow = nrow(native_df) + 7, headerStyle = hs1)
   writeData(wb, "QA QC", RR_df, rowNames = TRUE, startRow = nrow(native_df) + nrow(ISTD_df) + 9, headerStyle = hs1)
-  writeData(wb, "QA QC", conc_df, rowNames = FALSE, startRow = nrow(native_df) + nrow(ISTD_df) + nrow(RR_df) + 11, headerStyle = hs1)
+  writeData(wb, "QA QC", conc_df, rowNames = TRUE, startRow = nrow(native_df) + nrow(ISTD_df) + nrow(RR_df) + 11, headerStyle = hs1)
   
   #add table names for clarity at top left of each table
   writeData(wb, "QA QC", paste0("Method val data from: ", mv_name), startCol = 1, startRow = 1)
-  writeData(wb, "QA QC", "Expected Native", startRow = 2, startCol = 1)
+  writeData(wb, "QA QC", "Expected Native", startRow = 2)
   writeData(wb, "QA QC", "Expected ISTD", startRow = 3)
+  writeData(wb, "QA QC", "Native Peak Areas", startRow = 5)
+  writeData(wb, "QA QC", "ISTD Peak Areas", startRow = nrow(native_df) + 7)
   writeData(wb, "QA QC", "Relative Response", startRow = nrow(native_df) + nrow(ISTD_df) + 9)
+  writeData(wb, "QA QC", "Measured Conc. (ng/mL)", startRow = nrow(native_df) + nrow(ISTD_df) + nrow(RR_df) + 11)
   
   addWorksheet(wb, "Peak Areas")
-  writeData(wb, "Peak Areas", corrected_conc_df, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Peak Areas", corrected_native_df, rowNames = TRUE, startRow = 1, headerStyle = hs1)
+  writeData(wb, "Peak Areas", corrected_ISTD_df, rowNames = TRUE, startRow = nrow(corrected_native_df) + 3, headerStyle = hs1)
+  writeData(wb, "Peak Areas", slope_df, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + 5, headerStyle = hs1)
+  writeData(wb, "Peak Areas", corrected_conc_df, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(slope_df) + 7, headerStyle = hs1)
+  writeData(wb, "Peak Areas", "Corrected Native", startRow = 1)
+  writeData(wb, "Peak Areas", "Corrected ISTD", startRow = nrow(corrected_native_df) + 3)
+  writeData(wb, "Peak Areas", "Corrected Concentration (ng/mL)", startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(slope_df) + 7, headerStyle = hs1)
+  
   # check against lod and reprint to file
-  writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_conc_df) + 3, headerStyle = hs1)
-  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_conc_df) + 6, headerStyle = hs1)
-  writeData(wb, "Peak Areas", "Concentration (ng/mL)", startCol = 1, startRow = 1)
-  writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_conc_df) + 6)
+  writeData(wb, "Peak Areas", LOD, rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 9, headerStyle = hs1)
+  writeData(wb, "Peak Areas", check_limit(corrected_conc_df, LOD, "<LOD"), rowNames = TRUE, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 12, headerStyle = hs1)
+  writeData(wb, "Peak Areas", "Concentration w/ LOD flags", startCol = 1, startRow = nrow(corrected_native_df) + nrow(corrected_ISTD_df) + nrow(corrected_conc_df) + nrow(slope_df) + 12)
   
   addWorksheet(wb, "Blank Subtractions")
-  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", blank_sub_df_1, startRow = 4, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", maximal_2, startRow = nrow(blank_sub_df_1) + 6, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", blank_sub_df_2, startRow = nrow(blank_sub_df_1) + 9, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Blank Subtractions", "Round 1", startCol = 1, startRow = 4)
-  writeData(wb, "Blank Subtractions", "Round 2", startCol = , startRow = nrow(blank_sub_df_1) + 9)
-  
+  writeData(wb, "Blank Subtractions", LOB, rowNames = TRUE, colNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", maximal_1, rowNames = TRUE, colNames = FALSE, startRow = 3)
+  writeData(wb, "Blank Subtractions", blank_sub_df_1, startRow = 5, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Blank Subtractions", "Blank Subtracted Conc. (ng/mL)", startCol = 1, startRow = 5)
+
   addWorksheet(wb, "Limit of Quantification")
-  writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Limit of Quantification", "Concentration (ng/mL)", startCol = 1, startRow = 1)
+  
+  addWorksheet(wb, "ISTD Recovery")
+  writeData(wb, "ISTD Recovery", percent_recovery, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "ISTD Recovery", "ISTD % Recovery", startCol = 1, startRow = 1)
+  writeData(wb, "ISTD Recovery", recovery_metrics, rowNames = TRUE, startRow = nrow(percent_recovery) + 3, headerStyle = hs1)
+  writeData(wb, "ISTD Recovery", "Recovery Metrics", startCol = 1, startRow = nrow(percent_recovery) + 3)
   
   LOQ_style <- createStyle(fgFill = "#fabf8f") 
   LOD_style <- createStyle(fgFill = "#afffaf")
+  writeData(wb, "Limit of Quantification", LOQ, rowNames = TRUE, headerStyle = hs1)
+  writeData(wb, "Limit of Quantification", LOD, rowNames = TRUE, colNames = FALSE, startRow = 3)
+  addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = 2, cols = seq(1, num_analytes + 1))
+  addStyle(wb, "Limit of Quantification", style = LOD_style, rows = 3, cols = seq(1, num_analytes + 1))
+  writeData(wb, "Limit of Quantification", export_df, rowNames = TRUE, startRow = 5, headerStyle = hs1)
+  writeData(wb, "Limit of Quantification", "Concentration (ng/mL)", startCol = 1, startRow = 5)
+  
   for (i in seq_len(nrow(LOQ_flags))) {
     for (j in seq_len(ncol(LOQ_flags))) {
       if (LOQ_flags[i, j] == "<LoQ") {
-        addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = i + 1, cols = j + 1, gridExpand = FALSE, stack = TRUE)
-        #print("added style")
+        addStyle(wb, "Limit of Quantification", style = LOQ_style, rows = i + 5, cols = j + 1, gridExpand = FALSE, stack = TRUE)
       } else if (export_df[i,j] == "<LoD") {
-        addStyle(wb, "Limit of Quantification", style = LOD_style, rows = i + 1, cols = j + 1, gridExpand = FALSE, stack = TRUE)
+        addStyle(wb, "Limit of Quantification", style = LOD_style, rows = i + 5, cols = j + 1, gridExpand = FALSE, stack = TRUE)
       }
     }
   }

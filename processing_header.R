@@ -70,7 +70,7 @@ download_file <- function(outer_folder, inner_folder, type) {
 read_into_dataframe <- function(raw_data) {
   all_data <- raw_data
   
-  while (all_data[1, 1] == "") {
+  while ((is.na(all_data[1, 1])) || (all_data[1, 1] == "")) {
     all_data[, 1] <- NULL
   }
 
@@ -83,12 +83,22 @@ read_into_dataframe <- function(raw_data) {
   all_data <- data.frame(lapply(all_data, function(x) tail(x, -1)))
   
   #make the row names the trial names and remove data irrelevant to calculations
-  rownames(all_data) <- all_data$Name
+  rownames(all_data) <- make.unique(as.character(all_data$Name))
   #remove columns before "level" column and one after (acq date/time)
   while (colnames(all_data)[1] != "Level") {
     all_data[, 1] <- NULL
   }
   all_data[, 2] <- NULL
+  
+  #sort rows by putting replicates first, followed by blanks
+  #find row indices of 1 NGML samples
+  ngml_indices <- grep("1 *.*NGML", rownames(all_data), ignore.case = TRUE)
+  if (length(ngml_indices) == 0) {
+    ngml_indices <- grep("1 *.*ppb", rownames(all_data), ignore.case = TRUE)
+  }
+  blank_indices <- grep("blank", rownames(all_data), ignore.case = TRUE)
+  start_indices <- c(ngml_indices, blank_indices)
+  all_data <- all_data[c(start_indices, setdiff(seq_len(nrow(all_data)), start_indices)), ]
   
   #force empty cells to 0, and make all data numeric instead of char
   all_data <- all_data %>%
