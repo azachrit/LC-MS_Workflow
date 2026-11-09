@@ -15,8 +15,8 @@
 
 
 #include functions and libraries from header file
-source("processing_header.R")
-#source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
+#source("processing_header.R") #for testing changes locally
+source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
 
 slope_calcs <- function(all_data, mapping) {
   analytes <- mapping[["Analyte"]]
