@@ -4,7 +4,7 @@
 ## Purpose: Automate LCMS/MS data processing
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 10/28/2026
+## Date Modified: 11/9/2026
 ## ---------------------------------------------------------
 
 #include functions and libraries from header file
@@ -31,6 +31,7 @@ import_method_val <- function() {
     first_col_name <- colnames(df)[1]
     df %>% 
       slice(1) %>% 
+      as.data.frame() %>%
       column_to_rownames(var = first_col_name)
   } else NULL
   
@@ -47,6 +48,7 @@ import_method_val <- function() {
   limits_df <- if ("LOB LOD" %in% sheets) { 
     read.xlsx(temp_file, sheet = "LOB LOD") %>% 
       slice(c(3, 7, 8)) %>% 
+      as.data.frame() %>%
       column_to_rownames(var = colnames(.)[1])
   } else NULL
   
@@ -97,7 +99,9 @@ QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df, mapping) {
       RSD = rsd,
       Percent_of_Expected = pct_exp,
       .id = "Metric"
-    ) %>% column_to_rownames("Metric")
+    ) %>% 
+      as.data.frame() %>%
+      column_to_rownames("Metric")
   }
   
   native_df <- calc_metrics(cal_data, analytes, expected_native)
@@ -125,6 +129,7 @@ QAQC <- function(cal_data, expected_native, expected_ISTD, slope_df, mapping) {
     conc_raw %>% rownames_to_column(var = "Metric"),
     conc_metrics
   ) %>% 
+    as.data.frame() %>%
     column_to_rownames(var = "Metric")
 
   list(native_df = native_df, ISTD_df = ISTD_df, RR_df = RR_df, conc_df = conc_df)
@@ -162,19 +167,19 @@ blank_subs <- function(concentration_df, limit_df) {
   
   if (!all(colnames(concentration_df) %in% colnames(limit_df)))
   {
-    wanring("can't check df against limit: mismatch in column names")
+    warning("can't check df against limit: mismatch in column names")
     return (concentration_df)
   }
 
   #make sure analytes are in same order for limit vector
   limit_vec <- as.numeric(limit_df[1, colnames(concentration_df)])
   
-  is_blank <- grep("blank", rownames(concentration_df), ignore.case = TRUE)
+  is_blank <- grep("blank", rownames(concentration_df), ignore.case = TRUE)[[1]]
   blank_vals <- concentration_df[is_blank, , drop = FALSE]
   
   # Calculate maximal blank vectorially
   maximal_blank <- map2_dbl(blank_vals, limit_vec, ~ {
-    if (all(is.na(.x))) 0 else mean(.x, na.rm = TRUE) + (.y * 1.895)
+    if (all(is.na(.x))) 0 else .x + (.y * 1.895)
   })
   
   conc_mat <- as.matrix(concentration_df)
@@ -191,7 +196,7 @@ ISTD_recovery <- function(corrected_ISTD, expected_ISTD, mapping) {
   colnames(percent_recovery) <- mapping[["Analyte"]]
   
   #exclude blank in metrics
-  no_blank_pr <- percent_recovery[-grep("blank", rownames(percent_recovery), ignore.case = TRUE), ]
+  no_blank_pr <- percent_recovery[-grep("blank", rownames(percent_recovery), ignore.case = TRUE)[[1]], ]
 
   metrics_df <- data.frame(
     Min     = apply(no_blank_pr, 2, min, na.rm = TRUE),
@@ -201,7 +206,7 @@ ISTD_recovery <- function(corrected_ISTD, expected_ISTD, mapping) {
     Std_Dev = apply(no_blank_pr, 2, sd, na.rm = TRUE)
   ) %>% t() %>% as.data.frame()
   
-  list(percent_recovery = percent_recovery, metrics_df = metrics_df)
+  list(percent_recovery = no_blank_pr, metrics_df = metrics_df)
 }
 
 check_limit <- function(concentration_df, limit_df, default) {
@@ -269,9 +274,9 @@ main <- function() {
   
   #find row indices of 1 NGML samples
   indices <- grep("(1 *[.]*NGML)|(1 *[.]*ppb)", rownames(all_data), ignore.case = TRUE)
-  if (length(indices) > 3) {
-   indices <- indices[1:3] 
-  }
+  #if (length(indices) > 3) {
+  # indices <- indices[1:3] 
+  #}
   cal_data <- all_data[indices, ]
   no_1ngml_data <- all_data[-indices, ]
 
