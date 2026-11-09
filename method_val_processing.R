@@ -295,7 +295,7 @@ main <- function() {
   addWorksheet(wb, "Variations")
   writeData(wb, "Variations", var_res$native_var_df, headerStyle = hs1)
   writeData(wb, "Variations", var_res$ISTD_var_df, startRow = length(rownames(var_res$native_var_df)) + 4, headerStyle = hs1)
-  writeData(wb, "Variations", var_res$accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(var_res$rownames(ISTD_var_df)) + 7, headerStyle = hs1)
+  writeData(wb, "Variations", accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(var_res$rownames(ISTD_var_df)) + 7, headerStyle = hs1)
   
   addWorksheet(wb, "Conc Calcs")
   writeData(wb, "Conc Calcs", conc_df, rowNames = TRUE, headerStyle = hs1)
