@@ -15,8 +15,8 @@
 
 
 #include functions and libraries from header file
-#source("processing_header.R") #for testing changes locally
-source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
+source("processing_header.R")
+#source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
 
 slope_calcs <- function(all_data, mapping) {
   analytes <- mapping[["Analyte"]]
@@ -79,7 +79,7 @@ slope_calcs <- function(all_data, mapping) {
   
   list(slopes_df = slopes, 
        native_avg_df = native_summary, 
-       istd_avg_df = istd_summary, 
+       ISTD_avg_df = istd_summary, 
        RR_df = RR_summary)
 }
 
@@ -222,7 +222,7 @@ main <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
-  file_md <- download_file("LC-MS/MS", "Processed Method Val Files", "method validation")
+  file_md <- download_file("LC-MS/MS", "Raw Method Val Data", "method validation")
   temp_file <- file_md[[1]]
   file_id <- file_md[[2]]
   
@@ -275,7 +275,7 @@ main <- function() {
   #set up global style formatting for workbook
   wb <- loadWorkbook(temp_file, na.convert = FALSE)
   modifyBaseFont(wb, fontName = "Times New Roman")
-  options("openxlsx.numFmt" = "0.000")
+  options("openxlsx.numFmt" = "0.00")
   hs1 <- createStyle(halign = "justify", textDecoration = "Bold", fontName = "Calibri", fontColour = "black", fgFill = "#e3e1e5")
   
   #add relevant data to temp file through openxlsx workbook
@@ -295,7 +295,7 @@ main <- function() {
   addWorksheet(wb, "Variations")
   writeData(wb, "Variations", var_res$native_var_df, headerStyle = hs1)
   writeData(wb, "Variations", var_res$ISTD_var_df, startRow = length(rownames(var_res$native_var_df)) + 4, headerStyle = hs1)
-  writeData(wb, "Variations", accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(rownames(var_res$ISTD_var_df)) + 7, headerStyle = hs1)
+  writeData(wb, "Variations", var_res$accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(var_res$rownames(ISTD_var_df)) + 7, headerStyle = hs1)
   
   addWorksheet(wb, "Conc Calcs")
   writeData(wb, "Conc Calcs", conc_df, rowNames = TRUE, headerStyle = hs1)

@@ -4,7 +4,7 @@
 ## Purpose: clean input and create shared, global variables
 ## Author: Alicia Melotik
 ## Date Created: 11/12/2025
-## Date Modified: 10/28/2026
+## Date Modified: 11/18/2026
 ## ---------------------------------------------------------
 
 library(openxlsx)    #https://www.rdocumentation.org/packages/openxlsx/versions/4.2.8.1
@@ -35,11 +35,7 @@ normalize_analyte_names <- function(cols) {
 #' @param type Descriptive label for the prompt string
 #'
 #' @return A named list containing `temp_file`, `id`, and `name`
-download_file <- function(outer_folder, inner_folder, type) {
-  if (!(exists("sd_meta"))) {
-    sd_meta <- shared_drive_get("SWEL Lab")
-  }
-  
+download_file <- function(sd_meta, outer_folder, inner_folder, type) {
   input_name <- NA
   while (is.na(input_name)) {
     input_name <- readline(prompt = paste0("Enter the ", type, " file name or press enter to use most recent one: "))
@@ -61,26 +57,36 @@ download_file <- function(outer_folder, inner_folder, type) {
     } else {
       # get most recently created file in the proper folder
       if (!exists("LCMS_folder")) {
-        LCMS_folder <- drive_find(pattern = paste0("^", outer_folder, "$"), shared_drive = "SWEL Lab", type = "folder")
+        LCMS_folder <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type = "folder")
       }
       
       if (nrow(LCMS_folder) == 0) {
-        stop(sprintf("ERROR: Parent folder '%s' not found.", outer_folder))
+        stop(sprintf("ERROR: Parent folder LC-MS/MS not found."))
       }
       
       # (Uses Drive API 'q' parameter to search directly inside LC-MS/MS)
       subfolder <- drive_find(
-        q = sprintf("'%s' in parents and name = '%s' and mimeType = 'application/vnd.google-apps.folder'", LCMS_folder$id[1], inner_folder),
+        q = sprintf("'%s' in parents and name = '%s' and mimeType = 'application/vnd.google-apps.folder'", LCMS_folder$id[1], outer_folder),
         shared_drive = "SWEL Lab"
       )
       
       # Check if subfolder exists
       if (nrow(subfolder) == 0) {
+        stop(paste0("ERROR: Subfolder '", outer_folder, "' does not exist in LC-MS/MS."))
+      }
+      
+      subfolder2 <- drive_find(
+        q = sprintf("'%s' in parents and name = '%s' and mimeType = 'application/vnd.google-apps.folder'", subfolder$id[1], inner_folder),
+        shared_drive = "SWEL Lab"
+      )
+      
+      # Check if subfolder exists
+      if (nrow(subfolder2) == 0) {
         stop(paste0("ERROR: Subfolder '", inner_folder, "' does not exist in LC-MS/MS."))
       }
       
       # Get the most recent file inside that subfolder
-      files <- drive_ls(path = as_id(subfolder$id[1]), orderBy = "createdTime desc")
+      files <- drive_ls(path = as_id(subfolder2$id[1]), orderBy = "createdTime desc")
       
       # Check if subfolder contains any files
       if (nrow(files) == 0) {
