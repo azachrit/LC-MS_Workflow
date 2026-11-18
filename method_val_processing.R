@@ -5,7 +5,7 @@
 ##              calculations, formatting, and output
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 11/4/2026
+## Date Modified: 11/18/2026
 ## ---------------------------------------------------------
 
 # NOTE ON LINEARITY:
@@ -15,8 +15,8 @@
 
 
 #include functions and libraries from header file
-source("processing_header.R")
-#source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
+#source("processing_header.R") #for testing changes locally
+source("https://raw.githubusercontent.com/azachrit/LC-MS_Workflow/refs/heads/main/processing_header.R")
 
 slope_calcs <- function(all_data, mapping) {
   analytes <- mapping[["Analyte"]]
@@ -222,9 +222,11 @@ main <- function() {
   ### ----Authenticate to Google Drive-------- ###
   googledrive::drive_auth()
   
-  file_md <- download_file("LC-MS/MS", "Raw Method Val Data", "method validation")
+  sd_meta <- shared_drive_get("SWEL Lab")
+  file_md <- download_file(sd_meta, "Method Validations", "Raw Method Validations", "method validation")
   temp_file <- file_md[[1]]
   file_id <- file_md[[2]]
+  file_name <- file_md[[3]]
   
   on.exit(unlink(temp_file), add = TRUE)
   
@@ -275,7 +277,7 @@ main <- function() {
   #set up global style formatting for workbook
   wb <- loadWorkbook(temp_file, na.convert = FALSE)
   modifyBaseFont(wb, fontName = "Times New Roman")
-  options("openxlsx.numFmt" = "0.00")
+  options("openxlsx.numFmt" = "0.000")
   hs1 <- createStyle(halign = "justify", textDecoration = "Bold", fontName = "Calibri", fontColour = "black", fgFill = "#e3e1e5")
   
   #add relevant data to temp file through openxlsx workbook
@@ -285,17 +287,17 @@ main <- function() {
 
   addWorksheet(wb, "Peak Areas")
   writeData(wb, "Peak Areas", slope_res$native_avg_df, rowNames = TRUE, headerStyle = hs1)
-  writeData(wb, "Peak Areas", slope_res$ISTD_avg_df, rowNames = TRUE, startCol = num_analytes + 3, headerStyle = hs1)
+  writeData(wb, "Peak Areas", slope_res$ISTD_avg_df, rowNames = TRUE, startCol = num_analytes + 4, headerStyle = hs1)
   writeData(wb, "Peak Areas", slope_res$RR_df, rowNames = TRUE, startRow = num_levels + 3, headerStyle = hs1)
   #add table names for clarity at top left of each table
   writeData(wb, "Peak Areas", "Avg Native Peak Areas", startCol = 1, startRow = 1)
-  writeData(wb, "Peak Areas", "Avg ISTD Peak Areas", startCol = num_analytes + 3, startRow = 1)
+  writeData(wb, "Peak Areas", "Avg ISTD Peak Areas", startCol = num_analytes + 4, startRow = 1)
   writeData(wb, "Peak Areas", "Relative Reponse", startCol = 1, startRow = num_levels + 3)
   
   addWorksheet(wb, "Variations")
   writeData(wb, "Variations", var_res$native_var_df, headerStyle = hs1)
   writeData(wb, "Variations", var_res$ISTD_var_df, startRow = length(rownames(var_res$native_var_df)) + 4, headerStyle = hs1)
-  writeData(wb, "Variations", var_res$accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(var_res$rownames(ISTD_var_df)) + 7, headerStyle = hs1)
+  writeData(wb, "Variations", accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(rownames(var_res$ISTD_var_df)) + 7, headerStyle = hs1)
   
   addWorksheet(wb, "Conc Calcs")
   writeData(wb, "Conc Calcs", conc_df, rowNames = TRUE, headerStyle = hs1)
@@ -321,10 +323,17 @@ main <- function() {
   #using google drive library (already imported), update file that raw data was pulled from
   #save and upload excel file to shared SWEL drive
   saveWorkbook(wb, temp_file, overwrite = TRUE)
+  LCMS_folder <- drive_find(pattern = "LC-MS/MS", shared_drive = "SWEL Lab", type = "folder")
+  subfolder <- drive_find(
+    q = sprintf("'%s' in parents and name = '%s' and mimeType = 'application/vnd.google-apps.folder'", LCMS_folder$id[1], "Method Validations"),
+    shared_drive = "SWEL Lab"
+  )
+  subfolder2 <- drive_find(
+    q = sprintf("'%s' in parents and name = '%s' and mimeType = 'application/vnd.google-apps.folder'", subfolder$id[1], "Processed Method Validations"),
+    shared_drive = "SWEL Lab"
+  )
+  drive_upload(media = temp_file, path = subfolder2$id[1], name = paste0(file_name, " Processed"))
   
-  #new_name <- paste0(format(Sys.Date(), format = "%Y-%m-%d"), "_Method_Val.xlsx")
-  #drive_update(file = as_id(file_id), media = temp_file, name = new_name) #If we want auto naming
-  drive_update(file = as_id(file_id), media = temp_file)
   
   #store data in tracking sheet
   #tracking_sheet <- drive_find(pattern = "Method Validation Metric Tracking", shared_drive = "SWEL Lab")
