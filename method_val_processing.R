@@ -5,7 +5,7 @@
 ##              calculations, formatting, and output
 ## Author: Alicia Melotik
 ## Date Created: 11/3/2025
-## Date Modified: 11/18/2026
+## Date Modified: 11/23/2026
 ## ---------------------------------------------------------
 
 # NOTE ON LINEARITY:
@@ -277,8 +277,9 @@ main <- function() {
   #set up global style formatting for workbook
   wb <- loadWorkbook(temp_file, na.convert = FALSE)
   modifyBaseFont(wb, fontName = "Times New Roman")
-  options("openxlsx.numFmt" = "0.000")
+  options("openxlsx.numFmt" = "0.00")
   hs1 <- createStyle(halign = "justify", textDecoration = "Bold", fontName = "Calibri", fontColour = "black", fgFill = "#e3e1e5")
+  flag_style <- createStyle(fgFill = "#fa8f8f") 
   
   #add relevant data to temp file through openxlsx workbook
   addWorksheet(wb, "Condensed Data")
@@ -299,6 +300,17 @@ main <- function() {
   writeData(wb, "Variations", var_res$ISTD_var_df, startRow = length(rownames(var_res$native_var_df)) + 4, headerStyle = hs1)
   writeData(wb, "Variations", accuracy_df, startRow = length(rownames(var_res$native_var_df)) + length(rownames(var_res$ISTD_var_df)) + 7, headerStyle = hs1)
   
+  native_rsd_coords <- which(var_res$native_var_df[3, ] > 10, arr.ind = TRUE)
+  istd_rsd_coords <- which(var_res$ISTD_var_df[3, ] > 10, arr.ind = TRUE)
+  if (nrow(native_rsd_coords) > 0) {
+    addStyle(wb, "Variations", style = flag_style, 
+             rows = 4, cols = native_rsd_coords[, "col"] + 1, gridExpand = FALSE, stack = TRUE)
+  }
+  if (nrow(istd_rsd_coords) > 0) {
+    addStyle(wb, "Variations", style = flag_style, 
+             rows = length(rownames(var_res$native_var_df)) + 7, cols = istd_rsd_coords[, "col"] + 1, gridExpand = FALSE, stack = TRUE)
+  }
+  
   addWorksheet(wb, "Conc Calcs")
   writeData(wb, "Conc Calcs", conc_df, rowNames = TRUE, headerStyle = hs1)
   
@@ -308,6 +320,12 @@ main <- function() {
   
   addWorksheet(wb, "Slope and R")
   writeData(wb, "Slope and R", slope_res$slopes_df, rowNames = TRUE, headerStyle = hs1)
+  
+  rsq_coords <- which(slope_res$slopes_df[2, ] < 0.99, arr.ind = TRUE)
+  if (length(rsq_coords) > 0) {
+    addStyle(wb, "Slope and R", style = flag_style, 
+             rows = 3, cols = rsq_coords + 1, gridExpand = FALSE, stack = TRUE)
+  }
   
   #adjust all column widths so they're readable
   #first sheet is always raw data (for now)
